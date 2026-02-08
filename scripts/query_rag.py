@@ -37,7 +37,9 @@ def load_config() -> Config:
     return Config(
         mongodb_uri=mongodb_uri,
         mongodb_db=os.getenv("MONGODB_DB", "mtg"),
-        mongodb_collection=os.getenv("MONGODB_COLLECTION", "card_embeddings"),
+        mongodb_collection=os.getenv(
+            "MONGODB_COLLECTION_EMBEDDINGS", "card_embeddings"
+        ),
         embed_model=os.getenv("EMBED_MODEL", "mixedbread-ai/mxbai-embed-xsmall-v1"),
         embed_model_path=os.getenv(
             "EMBED_MODEL", "models/mixedbread-ai/mxbai-embed-xsmall-v1"

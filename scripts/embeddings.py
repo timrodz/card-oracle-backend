@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from types import ModuleType
 from typing import List, Optional
 
@@ -15,14 +16,24 @@ def load_embedder(model_name: str, model_path: str) -> SentenceTransformer:
     device = "cpu"
     if torch_module is not None and torch_module.cuda.is_available():
         device = "cuda"
-    logging.info(
-        "Loading embedding model: %s (device=%s, path=%s)",
-        model_name,
-        device,
-        model_path,
-    )
-    model = SentenceTransformer(model_name, device=device)
-    model.save(model_path)
+    resolved_path = Path(model_path)
+    if resolved_path.exists():
+        logging.info(
+            "Loading embedding model from path: %s (device=%s)",
+            resolved_path,
+            device,
+        )
+        model = SentenceTransformer(str(resolved_path), device=device)
+    else:
+        logging.info(
+            "Loading embedding model: %s (device=%s, path=%s)",
+            model_name,
+            device,
+            model_path,
+        )
+        model = SentenceTransformer(model_name, device=device)
+        resolved_path.mkdir(parents=True, exist_ok=True)
+        model.save(str(resolved_path))
     return model
 
 

@@ -21,8 +21,6 @@ class Config:
     mongodb_collection: str
     model_name: str
     model_path: str
-    chunk_tokens: int
-    chunk_overlap: int
     mongo_batch_size: int
     normalize_embeddings: bool
 
@@ -35,18 +33,13 @@ def load_config() -> Config:
         raise ValueError("MONGODB_URI is required in the environment")
 
     mongodb_db = os.getenv("MONGODB_DB", "mtg")
-    mongodb_collection = os.getenv("MONGODB_COLLECTION", "card_embeddings")
+    mongodb_collection = os.getenv("MONGODB_COLLECTION_EMBEDDINGS", "card_embeddings")
     model_name = os.getenv("EMBED_MODEL_NAME", "mixedbread-ai/mxbai-embed-xsmall-v1")
     model_path = os.getenv(
         "EMBED_MODEL_PATH", "models/mixedbread-ai/mxbai-embed-xsmall-v1"
     )
-    chunk_tokens = int(os.getenv("CHUNK_TOKENS", "320"))
-    chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "64"))
     mongo_batch_size = int(os.getenv("MONGO_BATCH_SIZE", "500"))
     normalize_embeddings = os.getenv("NORMALIZE_EMBEDDINGS", "true").lower() == "true"
-
-    if chunk_overlap >= chunk_tokens:
-        raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_TOKENS")
 
     return Config(
         dataset_path=dataset_path,
@@ -55,8 +48,6 @@ def load_config() -> Config:
         mongodb_collection=mongodb_collection,
         model_name=model_name,
         model_path=model_path,
-        chunk_tokens=chunk_tokens,
-        chunk_overlap=chunk_overlap,
         mongo_batch_size=mongo_batch_size,
         normalize_embeddings=normalize_embeddings,
     )
@@ -109,6 +100,7 @@ def select_and_validate_fields(raw_card: Dict[str, Any]) -> Optional[Dict[str, A
         "type_line": raw_card.get("type_line"),
         "rarity": raw_card.get("rarity"),
         "oracle_text": oracle_text,
+        "flavor_text": raw_card.get("flavor_text"),
         "price_usd": price_usd,
         "cmc": raw_card.get("cmc"),
         "mana_cost": raw_card.get("mana_cost"),
@@ -122,85 +114,56 @@ def normalize_text(text: Optional[str]) -> Optional[str]:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def chunk_oracle_text(
-    oracle_text: Optional[str],
-    tokenizer,
-    max_tokens: int,
-    overlap: int,
-) -> List[str]:
-    if not oracle_text:
-        return []
-    encoding = tokenizer(
-        oracle_text,
-        return_offsets_mapping=True,
-        add_special_tokens=False,
+def normalize_mana_symbols(text: Optional[str]) -> Optional[str]:
+    if text is None:
+        return None
+    normalized = text.replace("{", " ").replace("}", " ")
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def build_searchable_representation(card: Dict[str, Any]) -> str:
+    name = card.get("name") or "Unknown"
+    type_line = card.get("type_line") or "Unknown"
+    mana_cost = normalize_mana_symbols(card.get("mana_cost"))
+    cmc = card.get("cmc")
+    oracle_text = normalize_mana_symbols(card.get("oracle_text"))
+    flavor_text = card.get("flavor_text")
+    price_usd = card.get("price_usd")
+
+    cost_parts: List[str] = []
+    if mana_cost:
+        cost_parts.append(f"Cost: {mana_cost}")
+    if cmc is not None:
+        cost_parts.append(f"(CMC {cmc})")
+        cost_parts.append(f"(Mana Value {cmc})")
+    cost_section = " ".join(cost_parts) if cost_parts else "Cost: None"
+
+    abilities_section = (
+        f"Abilities: {oracle_text}" if oracle_text else "Abilities: None"
     )
-    offsets = encoding.get("offset_mapping", [])
-    if not offsets:
-        return []
+    flavor_section = f"Flavor: {flavor_text}" if flavor_text else "Flavor: None"
 
-    chunks: List[str] = []
-    start = 0
-    total_tokens = len(offsets)
-    while start < total_tokens:
-        end = min(start + max_tokens, total_tokens)
-        char_start = offsets[start][0]
-        char_end = offsets[end - 1][1]
-        chunk = oracle_text[char_start:char_end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= total_tokens:
-            break
-        start = max(0, end - overlap)
-    return chunks
+    if price_usd is None:
+        price_section = "Current Price: None"
+    else:
+        price_section = f"Current Price: ${price_usd} USD"
+
+    return (
+        f"Card Name: {name}. "
+        f"Type: {type_line}. "
+        f"{cost_section}. "
+        f"{abilities_section}. "
+        f"{flavor_section}. "
+        f"{price_section}."
+    )
 
 
-def build_chunk_records(
-    card: Dict[str, Any], chunks: List[str]
-) -> List[Dict[str, Any]]:
-    records: List[Dict[str, Any]] = []
-    for index, chunk in enumerate(chunks):
-        records.append(
-            {
-                "_id": f"{card['id']}:{index}",
-                "source_id": card["id"],
-                "chunk_index": index,
-                "chunk_count": len(chunks),
-                "chunk_text": chunk,
-                "oracle_text": card["oracle_text"],
-                "has_oracle_text": True,
-                "price_usd": card["price_usd"],
-                "cmc": card["cmc"],
-                "mana_cost": card["mana_cost"],
-                "set_name": card["set_name"],
-                "name": card["name"],
-                "type_line": card["type_line"],
-                "rarity": card["rarity"],
-            }
-        )
-    return records
-
-
-def build_empty_record(card: Dict[str, Any]) -> Dict[str, Any]:
+def build_card_record(card: Dict[str, Any]) -> Dict[str, Any]:
+    searchable_representation = build_searchable_representation(card)
     return {
-        "_id": f"{card['id']}:-1",
+        "_id": card["id"],
         "source_id": card["id"],
-        "chunk_index": -1,
-        "chunk_count": 0,
-        "chunk_text": None,
-        "oracle_text": card["oracle_text"],
-        "has_oracle_text": False,
-        "price_usd": card["price_usd"],
-        "cmc": card["cmc"],
-        "mana_cost": card["mana_cost"],
-        "set_name": card["set_name"],
-        "name": card["name"],
-        "type_line": card["type_line"],
-        "rarity": card["rarity"],
-        "embeddings": None,
-        "embedding_model": None,
-        "embedding_dim": 0,
-        "embedded_at": None,
+        "summary": searchable_representation,
     }
 
 
@@ -213,12 +176,10 @@ def embed_chunks(
     for record in chunk_records:
         record["embeddings"] = embed_text(
             model,
-            record["chunk_text"],
+            record["summary"],
             normalize_embeddings,
         )
-        record["embedding_model"] = model_name
-        record["embedding_dim"] = len(record["embeddings"])
-        record["embedded_at"] = datetime.now(timezone.utc)
+        record["created_at"] = datetime.now(timezone.utc)
     return chunk_records
 
 
@@ -231,7 +192,6 @@ def upsert_embeddings(collection, records: List[Dict[str, Any]]) -> None:
 
 def run_pipeline(config: Config, limit: Optional[int]) -> None:
     model = load_embedder(config.model_name, config.model_path)
-    tokenizer = model.tokenizer
 
     client: MongoClient = MongoClient(config.mongodb_uri)
     collection = client[config.mongodb_db][config.mongodb_collection]
@@ -240,7 +200,6 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
     missing_oracle_text = 0
     total_chunks = 0
     buffer: List[Dict[str, Any]] = []
-    empty_buffer: List[Dict[str, Any]] = []
 
     for raw_card in load_raw_cards(config.dataset_path, limit):
         total_cards += 1
@@ -251,30 +210,10 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
         card["oracle_text"] = normalize_text(card["oracle_text"])
         if not card["oracle_text"]:
             missing_oracle_text += 1
-            empty_buffer.append(build_empty_record(card))
-            if len(empty_buffer) >= config.mongo_batch_size:
-                upsert_embeddings(collection, empty_buffer)
-                logging.info("Upserted %d empty records", len(empty_buffer))
-                empty_buffer.clear()
-            continue
 
-        chunks = chunk_oracle_text(
-            card["oracle_text"],
-            tokenizer,
-            config.chunk_tokens,
-            config.chunk_overlap,
-        )
-        if not chunks:
-            empty_buffer.append(build_empty_record(card))
-            if len(empty_buffer) >= config.mongo_batch_size:
-                upsert_embeddings(collection, empty_buffer)
-                logging.info("Upserted %d empty records", len(empty_buffer))
-                empty_buffer.clear()
-            continue
-
-        chunk_records = build_chunk_records(card, chunks)
-        buffer.extend(chunk_records)
-        total_chunks += len(chunk_records)
+        record = build_card_record(card)
+        buffer.append(record)
+        total_chunks += 1
 
         if len(buffer) >= config.mongo_batch_size:
             embedded = embed_chunks(
@@ -296,10 +235,6 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
         )
         upsert_embeddings(collection, embedded)
         logging.info("Upserted %d chunks", len(buffer))
-
-    if empty_buffer:
-        upsert_embeddings(collection, empty_buffer)
-        logging.info("Upserted %d empty records", len(empty_buffer))
 
     logging.info("Total cards read: %d", total_cards)
     logging.info("Total cards missing oracle_text: %d", missing_oracle_text)
