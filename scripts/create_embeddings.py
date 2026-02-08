@@ -9,13 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from dotenv import load_dotenv
+from embeddings import embed_text, load_embedder
 from pymongo import MongoClient, ReplaceOne
-from sentence_transformers import SentenceTransformer
-
-try:
-    import torch
-except ImportError:  # pragma: no cover - torch is a dependency of sentence-transformers
-    torch = None
 
 
 @dataclass
@@ -25,9 +20,9 @@ class Config:
     mongodb_db: str
     mongodb_collection: str
     model_name: str
+    model_path: str
     chunk_tokens: int
     chunk_overlap: int
-    embed_batch_size: int
     mongo_batch_size: int
     normalize_embeddings: bool
 
@@ -41,10 +36,12 @@ def load_config() -> Config:
 
     mongodb_db = os.getenv("MONGODB_DB", "mtg")
     mongodb_collection = os.getenv("MONGODB_COLLECTION", "card_embeddings")
-    model_name = os.getenv("EMBED_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
+    model_name = os.getenv("EMBED_MODEL_NAME", "mixedbread-ai/mxbai-embed-xsmall-v1")
+    model_path = os.getenv(
+        "EMBED_MODEL_PATH", "models/mixedbread-ai/mxbai-embed-xsmall-v1"
+    )
     chunk_tokens = int(os.getenv("CHUNK_TOKENS", "320"))
     chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "64"))
-    embed_batch_size = int(os.getenv("EMBED_BATCH_SIZE", "32"))
     mongo_batch_size = int(os.getenv("MONGO_BATCH_SIZE", "500"))
     normalize_embeddings = os.getenv("NORMALIZE_EMBEDDINGS", "true").lower() == "true"
 
@@ -57,9 +54,9 @@ def load_config() -> Config:
         mongodb_db=mongodb_db,
         mongodb_collection=mongodb_collection,
         model_name=model_name,
+        model_path=model_path,
         chunk_tokens=chunk_tokens,
         chunk_overlap=chunk_overlap,
-        embed_batch_size=embed_batch_size,
         mongo_batch_size=mongo_batch_size,
         normalize_embeddings=normalize_embeddings,
     )
@@ -208,22 +205,17 @@ def build_empty_record(card: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def embed_chunks(
-    model: SentenceTransformer,
+    model,
     chunk_records: List[Dict[str, Any]],
-    batch_size: int,
     normalize_embeddings: bool,
     model_name: str,
 ) -> List[Dict[str, Any]]:
-    texts = [record["chunk_text"] for record in chunk_records]
-    embeddings = model.encode(
-        texts,
-        batch_size=batch_size,
-        show_progress_bar=False,
-        convert_to_numpy=True,
-        normalize_embeddings=normalize_embeddings,
-    )
-    for record, embedding in zip(chunk_records, embeddings):
-        record["embeddings"] = embedding.tolist()
+    for record in chunk_records:
+        record["embeddings"] = embed_text(
+            model,
+            record["chunk_text"],
+            normalize_embeddings,
+        )
         record["embedding_model"] = model_name
         record["embedding_dim"] = len(record["embeddings"])
         record["embedded_at"] = datetime.now(timezone.utc)
@@ -238,15 +230,10 @@ def upsert_embeddings(collection, records: List[Dict[str, Any]]) -> None:
 
 
 def run_pipeline(config: Config, limit: Optional[int]) -> None:
-    device = "cpu"
-    if torch is not None and torch.cuda.is_available():
-        device = "cuda"
-
-    logging.info("Loading embedding model: %s (device=%s)", config.model_name, device)
-    model = SentenceTransformer(config.model_name, device=device)
+    model = load_embedder(config.model_name, config.model_path)
     tokenizer = model.tokenizer
 
-    client = MongoClient(config.mongodb_uri)
+    client: MongoClient = MongoClient(config.mongodb_uri)
     collection = client[config.mongodb_db][config.mongodb_collection]
 
     total_cards = 0
@@ -293,7 +280,6 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
             embedded = embed_chunks(
                 model,
                 buffer,
-                config.embed_batch_size,
                 config.normalize_embeddings,
                 config.model_name,
             )
@@ -305,7 +291,6 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
         embedded = embed_chunks(
             model,
             buffer,
-            config.embed_batch_size,
             config.normalize_embeddings,
             config.model_name,
         )

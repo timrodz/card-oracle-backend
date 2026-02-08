@@ -1,7 +1,12 @@
-.env*
+.env
 .venv
 datasets/scryfall/*.json
 datasets/sampledata.archive
 models
 .DS_Store
 logs
+
+.mypy_cache
+.pytest_cache
+.ruff_cache
+__pycache__

@@ -111,3 +111,22 @@ Verify the index setup worked:
 > atlas local search indexes list --deploymentName <DEPLOYMENT> --output json --db mtg --collection card_embeddings
 {"outcome":"success","indexes":[{"id":"698842c3b41ae52dc72ff96f","name":"vector_index","database":"mtg","collectionName":"card_embeddings","status":"READY","type":"vectorSearch"}]}
 ```
+
+### 2. Query (RAG)
+
+Use the local Sentence Transformers embedder for the query, run vector search, and
+have Ollama answer with retrieved context:
+
+```bash
+python scripts/query_rag.py "Which cards care about Phyrexians?"
+```
+
+Environment variables for tuning the query flow:
+
+- `VECTOR_INDEX_NAME` (default: `vector_index`)
+- `VECTOR_EMBED_PATH` (default: `embeddings`)
+- `VECTOR_NUM_CANDIDATES` (default: `100`)
+- `VECTOR_LIMIT` (default: `5`)
+- `OLLAMA_MODEL` (default: `mistral:7b`)
+- `RAG_MAX_CONTEXT_CHARS` (default: `4000`)
+- `OLLAMA_TIMEOUT` (default: `120`)
