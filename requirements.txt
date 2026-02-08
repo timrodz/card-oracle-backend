@@ -2,3 +2,7 @@ dnspython==2.8.0
 dotenv==0.9.9
 pymongo==4.16.0
 python-dotenv==1.2.1
+sentence-transformers==5.2.2
+ruff==0.15.0
+mypy==1.18.1
+pytest==9.0.2
