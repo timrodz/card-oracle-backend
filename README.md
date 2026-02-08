@@ -1,4 +1,4 @@
-# MTG Oracle backend
+# Card Oracle backend
 
 ## Development Setup
 
@@ -28,7 +28,7 @@ uvx hf download mixedbread-ai/mxbai-embed-xsmall-v1 --local-dir models/mixedbrea
 ollama run mistral
 ```
 
-#### Installation
+### Installation
 
 1. Install `uv`
 2. Install Python: `uv python install 3.12`
@@ -41,6 +41,14 @@ ollama run mistral
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
+```
+
+### Development
+
+Run the FastAPI server:
+
+```
+fastapi dev main.py
 ```
 
 ## Datasets
