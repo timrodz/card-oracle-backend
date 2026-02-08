@@ -2,3 +2,6 @@
 .venv
 datasets/scryfall/*.json
 datasets/sampledata.archive
+models
+.DS_Store
+logs
