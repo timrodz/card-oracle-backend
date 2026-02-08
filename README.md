@@ -12,11 +12,12 @@
 
 #### Transformers
 
-- Model: `mixedbread-ai/mxbai-embed-large-v1` (via Sentence Transformers)
+- Model: `mixedbread-ai/mxbai-embed-xsmall-v1` (via Sentence Transformers)
+  - Dimensions: 384 (Enough for short text)
 
 ```bash
 uvx hf auth login
-uvx hf download mixedbread-ai/mxbai-embed-large-v1 --local-dir models/mixedbread-ai/mxbai-embed-large-v1
+uvx hf download mixedbread-ai/mxbai-embed-xsmall-v1 --local-dir models/mixedbread-ai/mxbai-embed-xsmall-v1
 ```
 
 #### LLMs
@@ -34,7 +35,7 @@ ollama run mistral
 3. Install [MongoDB 8.2](https://www.mongodb.com/docs/manual/administration/install-community/?operating-system=macos&macos-installation-method=homebrew). 8.2 has vector database support so this is the minimal version required.
 4. Create a Mongo atlas: `atlas local setup`. Choose `Connection string` as the interaction method.
 5. Add the connection string to `MONGODB_URI` in `.env`
-6. Setup `EMBED_MODEL` in `.env` with the location of your installed model: `modelsmixedbread-ai/mxbai-embed-large-v1`
+6. Setup `EMBED_MODEL` in `.env` with the location of your installed model: `models/<model>`
 
 ```bash
 uv venv
