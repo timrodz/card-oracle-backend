@@ -79,6 +79,7 @@ def run_pipeline(config: Dict[str, Any], limit: Optional[int]) -> None:
             continue
         record = dict(raw_card)
         record["_id"] = card_id
+        record.pop("id", None)
         buffer.append(record)
 
         if len(buffer) >= config["mongo_batch_size"]:
