@@ -5,11 +5,12 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-import ollama
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
-from app.data_pipeline.embeddings import embed_text, load_embedder  # noqa: E402
+from app.data_pipeline.embeddings import embed_text, load_embedder
+from app.data_pipeline.providers.ollama import OllamaProvider
+from app.data_pipeline.providers.provider import LLMProvider  # noqa: E402
 
 
 @dataclass
@@ -24,9 +25,11 @@ class Config:
     vector_path: str
     num_candidates: int
     limit: int
-    ollama_model: str
+    llm_provider: str
+    llm_model: str
+    llm_endpoint: str | None
     max_context_chars: int
-    ollama_timeout: int
+    llm_timeout: int
 
 
 def load_config() -> Config:
@@ -51,9 +54,11 @@ def load_config() -> Config:
         vector_path=os.getenv("VECTOR_EMBED_PATH", "embeddings"),
         num_candidates=int(os.getenv("VECTOR_NUM_CANDIDATES", "100")),
         limit=int(os.getenv("VECTOR_LIMIT", "5")),
-        ollama_model=os.getenv("OLLAMA_MODEL", "mistral"),
+        llm_provider=os.getenv("LLM_PROVIDER", "ollama"),
+        llm_model=os.getenv("LLM_MODEL", "mistral"),
+        llm_endpoint=os.getenv("LLM_ENDPOINT"),
         max_context_chars=int(os.getenv("RAG_MAX_CONTEXT_CHARS", "4000")),
-        ollama_timeout=int(os.getenv("OLLAMA_TIMEOUT", "120")),
+        llm_timeout=int(os.getenv("LLM_TIMEOUT", "120")),
     )
 
 
@@ -127,25 +132,11 @@ Question: {question}
 """
 
 
-def run_ollama(model: str, prompt: str, timeout: int) -> str:
-    host = os.getenv("OLLAMA_HOST")
-    try:
-        if host:
-            client = ollama.Client(host=host, timeout=timeout)
-        else:
-            client = ollama.Client(timeout=timeout)
-    except TypeError:
-        client = ollama.Client(host=host) if host else ollama.Client()
-
-    try:
-        result = client.generate(model=model, prompt=prompt)
-    except Exception as exc:  # pragma: no cover - depends on runtime service state
-        raise RuntimeError(f"ollama generate failed: {exc}") from exc
-
-    response = result["response"]
-    if not response:
-        raise RuntimeError("ollama generate returned no response")
-    return response.strip()
+def build_provider(config: Config) -> LLMProvider:
+    provider = config.llm_provider.lower()
+    if provider == "ollama":
+        return OllamaProvider(config.llm_model, config.llm_timeout, config.llm_endpoint)
+    raise ValueError(f"Unsupported LLM_PROVIDER: {config.llm_provider}")
 
 
 def query_rag(question: str, config: Config) -> Dict[str, Any]:
@@ -172,7 +163,8 @@ def query_rag(question: str, config: Config) -> Dict[str, Any]:
         return {"results": results, "context": "", "answer": None}
 
     prompt = build_prompt(question, context)
-    response = run_ollama(config.ollama_model, prompt, config.ollama_timeout)
+    provider = build_provider(config)
+    response = provider.generate(prompt)
     return {"results": results, "context": context, "answer": response}
 
 
@@ -185,7 +177,7 @@ def log_results(results: List[Dict[str, Any]]) -> None:
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(
-        description="Run a vector search query and answer with Ollama."
+        description="Run a vector search query and answer with an LLM provider."
     )
     parser.add_argument("question", nargs="?", help="User question")
     parser.add_argument(

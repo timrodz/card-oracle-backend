@@ -8,16 +8,16 @@ This repository implements a local RAG (Retrieval-Augmented Generation) flow for
 
 ```mermaid
 flowchart TD
-    A["Scryfall JSON (datasets/)"] --> B["scripts/create_embeddings.py"]
+    A["Scryfall JSON (datasets/)"] --> B["app/data_pipeline/create_embeddings.py"]
     B --> C["Chunk oracle_text"]
     C --> D["Embed chunks (Sentence Transformers)"]
     D --> E["MongoDB collection: card_embeddings"]
     E --> F["$vectorSearch (vector_index)"]
-    G["User question"] --> H["scripts/query_rag.py"]
+    G["User question"] --> H["app/data_pipeline/query_rag.py"]
     H --> I["Embed question (Sentence Transformers)"]
     I --> F
     F --> J["Context builder"]
-    J --> K["Ollama (ollama-python)"]
+    J --> K["LLM Provider"]
     K --> L["RAG answer"]
 ```
 
@@ -26,10 +26,10 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant QR as "scripts/query_rag.py"
+    participant QR as "app/data_pipeline/query_rag.py"
     participant EM as "Embedding model"
     participant DB as "MongoDB (vector search)"
-    participant OL as "Ollama"
+    participant OL as "LLM Provider"
 
     U->>QR: Question
     QR->>EM: Embed question
@@ -78,7 +78,7 @@ The query pipeline uses the index defined by `vector-index.json`:
 
 ## RAG Response Generation
 
-After retrieval, the script builds a compact context block with card metadata and the matched chunk text, then prompts Ollama (via `ollama-python`) to produce the final answer. The context length is capped to avoid overlong prompts.
+After retrieval, the script builds a compact context block with card metadata and the matched chunk text, then prompts the configured LLM provider to produce the final answer. The context length is capped to avoid overlong prompts.
 
 ## Configuration
 
@@ -94,9 +94,10 @@ Key environment variables:
 - `VECTOR_EMBED_PATH` (default: `embeddings`)
 - `VECTOR_LIMIT` (default: `5`)
 - `RAG_MAX_CONTEXT_CHARS` (default: `4000`)
-- `OLLAMA_MODEL` (default: `mistral`)
-- `OLLAMA_TIMEOUT` (default: `120`)
-- `OLLAMA_HOST` (default: `http://127.0.0.1:11434`)
+- `LLM_PROVIDER` (default: `ollama`)
+- `LLM_MODEL` (default: `mistral`)
+- `LLM_TIMEOUT` (default: `120`)
+- `LLM_ENDPOINT` (default: `http://127.0.0.1:11434`)
 
 Note on search tuning:
 
@@ -107,11 +108,11 @@ Note on search tuning:
 Embed a sample of cards:
 
 ```bash
-python scripts/create_embeddings.py --limit 50
+python -m app.data_pipeline.create_embeddings --limit 50
 ```
 
 Run a RAG query:
 
 ```bash
-python scripts/query_rag.py "Which cards care about Phyrexians?"
+python -m app.data_pipeline.query_rag "Which cards care about Phyrexians?"
 ```
