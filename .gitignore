@@ -1,3 +1,4 @@
 .env*
 .venv
 datasets/scryfall/*.json
+datasets/sampledata.archive

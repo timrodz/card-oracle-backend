@@ -5,7 +5,7 @@ from pymongo import MongoClient
 
 load_dotenv()
 
-uri = os.getenv("MONGO_CONNECTION_URI")
+uri = os.getenv("MONGODB_URI")
 print(f"Connecting to database: {uri}")
 client = MongoClient(uri)
 
