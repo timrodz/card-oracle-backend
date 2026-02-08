@@ -55,14 +55,20 @@ fastapi dev main.py
 
 - Source: [Scryfall](https://scryfall.com/docs/api/bulk-data)
 
-## RAG Pipeline
+## Data Pipeline
 
 ### 1. Ingestion
 
-Verify the pipeline works:
+Load the JSON response into a collection. We will use this later for API endpoints and extra augmentation.
 
 ```bash
-python scripts/create_embeddings.py > logs/embedding-sample.log 2>&1 --limit 50
+python -m app.data_pipeline.ingest_dataset > logs/ingest_dataset.log 2>&1
+```
+
+Run embeddings with 50 entries just to verify it all works well
+
+```bash
+python -m app.data_pipeline.create_embeddings > logs/create_embeddings_sample.log 2>&1 --limit 50
 ```
 
 This will take ~15-30 seconds.
@@ -72,30 +78,37 @@ Then connect to Mongo via CLI and query the database:
 ```bash
 > mongosh
 > use mtg
+> db.cards.find()
+{
+  "_id": "a471b306-4941-4e46-a0cb-d92895c16f8a",
+  "object": "card",
+  "id": "a471b306-4941-4e46-a0cb-d92895c16f8a",
+  "oracle_id": "00037840-6089-42ec-8c5c-281f9f474504",
+  "multiverse_ids": [
+    692174
+  ],
+  "mtgo_id": 137223,
+  "tcgplayer_id": 615195,
+  "cardmarket_id": 807933,
+  "name": "Nissa, Worldsoul Speaker",
+  ...
+}
 > db.card_embeddings.find()
 {
-  _id: 'bea12617-ebaa-45f6-a2e8-b71190708129:0',
-  source_id: 'bea12617-ebaa-45f6-a2e8-b71190708129',
-  chunk_index: 0,
-  chunk_count: 1,
-  chunk_text: "Affinity for Phyrexians (This spell costs {1} less to cast for each Phyrexian you control.) Flying Phyrexian Broodstar's power and toughness are each equal to the number of Phyrexians you control.",
-  oracle_text: "Affinity for Phyrexians (This spell costs {1} less to cast for each Phyrexian you control.) Flying Phyrexian Broodstar's power and toughness are each equal to the number of Phyrexians you control.",
-  has_oracle_text: true,
-  price_usd: null,
-  cmc: 8,
-  mana_cost: '{6}{U}{U}',
-  set_name: 'Unknown Event',
-  name: 'Phyrexian Broodstar',
-  type_line: 'Creature — Phyrexian Beast',
-  rarity: 'rare',
-  embeddings: [<384 entries here>]
+  "_id": "a471b306-4941-4e46-a0cb-d92895c16f8a",
+  "source_id": "a471b306-4941-4e46-a0cb-d92895c16f8a",
+  "summary": "Card Name: Nissa, Worldsoul Speaker. Type: Legendary Creature — Elf Druid. Cost: 3 G (CMC 4.0) (Mana Value 4.0). Abilities: Landfall — Whenever a land you control enters, you get E E (two energy counters). You may pay eight E rather than pay the mana cost for permanent spells you cast.. Flavor: \"Zendikar still seems so far off, but Chandra is my home.\". Current Price: $0.17 USD.",
+  "embeddings": [...384 entries here...],
+  "created_at": {
+    "$date": "2026-02-08T09:40:42.662Z"
+  }
 }
 ```
 
 If the above went right, you're ready to run the entire ingestion pipeline:
 
 ```bash
-> python scripts/create_embeddings.py > logs/embedding-sample.log 2>&1
+> python -m app.data_pipeline.create_embedding > logs/create_embeddings.log 2>&1
 ```
 
 Note: This will take anywhere around 10 minutes on a Macbook with no GPU.
@@ -107,7 +120,7 @@ Create the MongoDB search index:
 NAME                 MDB VER    STATE
 <DEPLOYMENT_NAME>    8.2.4      running
 # This command below doesn't work in Atlas 1.52, use the old one for now
-# > atlas local search indexes create --deploymentName <DEPLOYMENT> --file vector-index.json 
+# > atlas local search indexes create --deploymentName <DEPLOYMENT> --file vector-index.json
 > atlas deployments search indexes create --file vector-index.json
 you're using an old search index definition
 Search index created with ID: 69884584b41ae52dc72ff971
@@ -126,15 +139,5 @@ Use the local Sentence Transformers embedder for the query, run vector search, a
 have Ollama answer with retrieved context:
 
 ```bash
-python scripts/query_rag.py "Which cards care about Phyrexians?"
+> python -m app.data_pipeline.query_rag "Which cards care about Phyrexians?"
 ```
-
-Environment variables for tuning the query flow:
-
-- `VECTOR_INDEX_NAME` (default: `vector_index`)
-- `VECTOR_EMBED_PATH` (default: `embeddings`)
-- `VECTOR_NUM_CANDIDATES` (default: `100`)
-- `VECTOR_LIMIT` (default: `5`)
-- `OLLAMA_MODEL` (default: `mistral:7b`)
-- `RAG_MAX_CONTEXT_CHARS` (default: `4000`)
-- `OLLAMA_TIMEOUT` (default: `120`)

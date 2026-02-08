@@ -3,12 +3,13 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import ollama
 from dotenv import load_dotenv
-from embeddings import embed_text, load_embedder
 from pymongo import MongoClient
+
+from app.data_pipeline.embeddings import embed_text, load_embedder  # noqa: E402
 
 
 @dataclass
@@ -90,15 +91,8 @@ def vector_search(
         {
             "$project": {
                 "_id": 0,
-                "name": 1,
-                "type_line": 1,
-                "oracle_text": 1,
-                "chunk_text": 1,
-                "chunk_index": 1,
-                "set_name": 1,
-                "mana_cost": 1,
-                "cmc": 1,
-                "rarity": 1,
+                "source_id": 1,
+                "summary": 1,
                 "score": {"$meta": "vectorSearchScore"},
             }
         },
@@ -107,39 +101,14 @@ def vector_search(
 
 
 def format_result(result: Dict[str, Any]) -> str:
-    name = result.get("name") or "Unknown"
-    type_line = result.get("type_line") or ""
-    set_name = result.get("set_name") or ""
-    mana_cost = result.get("mana_cost") or ""
-    score = result.get("score")
-    chunk_text = result.get("chunk_text") or result.get("oracle_text") or ""
-    return (
-        f"- {name} {mana_cost} ({set_name})\n"
-        f"  {type_line}\n"
-        f"  score: {score:.4f}\n"
-        f"  {chunk_text}"
-    )
+    return result["summary"]
 
 
 def build_context(results: List[Dict[str, Any]], max_chars: int) -> str:
     sections: List[str] = []
     total = 0
     for result in results:
-        name = result.get("name") or "Unknown"
-        type_line = result.get("type_line") or ""
-        oracle_text = result.get("oracle_text") or ""
-        chunk_text = result.get("chunk_text") or ""
-        set_name = result.get("set_name") or ""
-        mana_cost = result.get("mana_cost") or ""
-
-        section = (
-            f"Card: {name}\n"
-            f"Set: {set_name}\n"
-            f"Type: {type_line}\n"
-            f"Mana Cost: {mana_cost}\n"
-            f"Oracle: {oracle_text}\n"
-            f"Chunk: {chunk_text}\n"
-        )
+        section = result["summary"]
         if total + len(section) > max_chars:
             remaining = max_chars - total
             if remaining > 0:
@@ -179,7 +148,7 @@ def run_ollama(model: str, prompt: str, timeout: int) -> str:
     return response.strip()
 
 
-def run_query(question: str, config: Config) -> None:
+def query_rag(question: str, config: Config) -> Dict[str, Any]:
     embedder = load_embedder(config.embed_model, config.embed_model_path)
     query_vector = embed_query(embedder, question, config.normalize_embeddings)
 
@@ -196,22 +165,21 @@ def run_query(question: str, config: Config) -> None:
     )
 
     if not results:
-        logging.info("No results found for query.")
-        return
-
-    logging.info("Top %d results:", len(results))
-    for result in results:
-        logging.info("\n%s", format_result(result))
+        return {"results": [], "context": "", "answer": None}
 
     context = build_context(results, config.max_context_chars)
     if not context:
-        logging.info("No context built from results; skipping LLM response.")
-        return
+        return {"results": results, "context": "", "answer": None}
 
     prompt = build_prompt(question, context)
     response = run_ollama(config.ollama_model, prompt, config.ollama_timeout)
-    print("\n---\nRAG Response\n---")
-    print(response)
+    return {"results": results, "context": context, "answer": response}
+
+
+def log_results(results: List[Dict[str, Any]]) -> None:
+    logging.info("Top %d results:", len(results))
+    for result in results:
+        logging.info("\n%s", format_result(result))
 
 
 def main() -> None:
@@ -241,7 +209,19 @@ def main() -> None:
         raise SystemExit("Question is required. Provide it as an argument.")
 
     config = load_config()
-    run_query(question, config)
+    result = query_rag(question, config)
+    results = result["results"]
+    if not results:
+        logging.info("No results found for query.")
+        return
+    log_results(results)
+    if not result["context"]:
+        logging.info("No context built from results; skipping LLM response.")
+        return
+    response: Optional[str] = result["answer"]
+    if response:
+        print("\n---\nRAG Response\n---")
+        print(response)
 
 
 if __name__ == "__main__":

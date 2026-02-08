@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from dotenv import load_dotenv
-from embeddings import embed_text, load_embedder
 from pymongo import MongoClient, ReplaceOne
+
+from app.data_pipeline.embeddings import embed_text, load_embedder
 
 
 @dataclass

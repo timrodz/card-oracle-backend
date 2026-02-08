@@ -11,10 +11,11 @@
 ## Build, Test, and Development Commands
 
 - `uv venv` creates the local virtual environment.
-- `source .venv/bin/activate` activates the venv.
+- `source .venv/bin/activate` activates the venv. Run this once per session.
 - `uv pip install -r requirements.txt` installs dependencies. When adding a new dependency run `--upgrade` so you grab the latest version.
-- `python main.py` verifies Mongo connectivity (prints the URI and a hello message).
-- `python scripts/create_embeddings.py --dataset-path datasets/scryfall` generates and upserts embeddings for Scryfall JSON data.
+- Always run Python via `.venv/bin/python` (even if the venv is activated) to ensure the correct interpreter is used.
+- `.venv/bin/python main.py` verifies Mongo connectivity (prints the URI and a hello message).
+- `.venv/bin/python scripts/create_embeddings.py --dataset-path datasets/scryfall` generates and upserts embeddings for Scryfall JSON data.
 
 ## Coding Style & Naming Conventions
 
