@@ -33,7 +33,7 @@ async def search_rag(query: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        result = await asyncio.to_thread(query_rag.query, encoded_query, config)
+        result = await asyncio.to_thread(query_rag.search, encoded_query, config)
     except Exception as exc:  # pragma: no cover - depends on external services
         raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
 
@@ -58,7 +58,7 @@ def search_rag_stream(query: str) -> Iterator[str]:
         return
 
     try:
-        for event in query_rag.query_stream(encoded_query, config):
+        for event in query_rag.search_stream(encoded_query, config):
             if event["type"] == "meta":
                 print(event)
             yield _encode_sse(event)

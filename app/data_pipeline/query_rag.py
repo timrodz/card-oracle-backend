@@ -45,9 +45,11 @@ def load_config() -> Config:
         mongodb_collection=os.getenv(
             "MONGODB_COLLECTION_EMBEDDINGS", "card_embeddings"
         ),
-        embed_model=os.getenv("EMBED_MODEL", "mixedbread-ai/mxbai-embed-xsmall-v1"),
+        embed_model=os.getenv(
+            "EMBED_MODEL_NAME", "mixedbread-ai/mxbai-embed-xsmall-v1"
+        ),
         embed_model_path=os.getenv(
-            "EMBED_MODEL", "models/mixedbread-ai/mxbai-embed-xsmall-v1"
+            "EMBED_MODEL_PATH", "models/mixedbread-ai/mxbai-embed-xsmall-v1"
         ),
         normalize_embeddings=os.getenv("NORMALIZE_EMBEDDINGS", "true").lower()
         == "true",
@@ -152,7 +154,7 @@ def cleanup_response(response: str) -> str:
     return text.strip()
 
 
-def query(question: str, config: Config) -> Dict[str, Any]:
+def search(question: str, config: Config) -> Dict[str, Any]:
     embedder = load_embedder(config.embed_model, config.embed_model_path)
     query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
 
@@ -187,7 +189,7 @@ def query(question: str, config: Config) -> Dict[str, Any]:
     }
 
 
-def query_stream(question: str, config: Config) -> Iterator[Dict[str, Any]]:
+def search_stream(question: str, config: Config) -> Iterator[Dict[str, Any]]:
     embedder = load_embedder(config.embed_model, config.embed_model_path)
     query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
 
@@ -261,7 +263,7 @@ def main() -> None:
         raise SystemExit("Question is required. Provide it as an argument.")
 
     config = load_config()
-    result = query(question, config)
+    result = search(question, config)
     results = result["results"]
     if not results:
         logging.info("No results found for query.")
