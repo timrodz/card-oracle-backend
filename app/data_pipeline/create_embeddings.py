@@ -109,6 +109,36 @@ def select_and_validate_fields(raw_card: Dict[str, Any]) -> Optional[Dict[str, A
     }
 
 
+def _is_empty_face(face: Dict[str, Any]) -> bool:
+    cmc = face.get("cmc")
+    colors = face.get("colors")
+    color_identity = face.get("color_identity")
+    keywords = face.get("keywords")
+    mana_cost = face.get("mana_cost")
+    return (
+        cmc == 0
+        and isinstance(colors, list)
+        and len(colors) == 0
+        and isinstance(color_identity, list)
+        and len(color_identity) == 0
+        and isinstance(keywords, list)
+        and len(keywords) == 0
+        and mana_cost == ""
+    )
+
+
+def _should_filter_card(raw_card: Dict[str, Any]) -> bool:
+    type_line = raw_card.get("type_line")
+    if type_line not in {"Card", "Card // Card"}:
+        return False
+
+    faces = raw_card.get("card_faces")
+    if isinstance(faces, list) and faces:
+        return any(isinstance(face, dict) and _is_empty_face(face) for face in faces)
+
+    return _is_empty_face(raw_card)
+
+
 def normalize_text(text: Optional[str]) -> Optional[str]:
     if text is None:
         return None
@@ -130,33 +160,28 @@ def build_searchable_representation(card: Dict[str, Any]) -> str:
     oracle_text = normalize_mana_symbols(card.get("oracle_text"))
     flavor_text = card.get("flavor_text")
     price_usd = card.get("price_usd")
+    set_name = card.get("set_name")
 
     cost_parts: List[str] = []
     if mana_cost:
         cost_parts.append(f"Cost: {mana_cost}")
     if cmc is not None:
-        cost_parts.append(f"(CMC {cmc})")
-        cost_parts.append(f"(Mana Value {cmc})")
+        cost_parts.append(f"(CMC or mana value {cmc})")
     cost_section = " ".join(cost_parts) if cost_parts else "Cost: None"
 
     abilities_section = (
         f"Abilities: {oracle_text}" if oracle_text else "Abilities: None"
     )
-    flavor_section = f"Flavor: {flavor_text}" if flavor_text else "Flavor: None"
 
+    # Unused
     if price_usd is None:
-        price_section = "Current Price: None"
+        _price_section = "Current Price: None"
     else:
-        price_section = f"Current Price: ${price_usd} USD"
+        _price_section = f"Current Price: ${price_usd} USD"
 
-    return (
-        f"Card Name: {name}. "
-        f"Type: {type_line}. "
-        f"{cost_section}. "
-        f"{abilities_section}. "
-        f"{flavor_section}. "
-        f"{price_section}."
-    )
+    _flavor_section = f"Flavor: {flavor_text}" if flavor_text else "Flavor: None"
+
+    return f"Card Name: {name}. Type: {type_line}. Set: {set_name}. {cost_section}. {abilities_section}. "
 
 
 def build_card_record(card: Dict[str, Any]) -> Dict[str, Any]:
@@ -204,6 +229,8 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
 
     for raw_card in load_raw_cards(config.dataset_path, limit):
         total_cards += 1
+        if _should_filter_card(raw_card):
+            continue
         card = select_and_validate_fields(raw_card)
         if card is None:
             continue
