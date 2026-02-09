@@ -115,11 +115,17 @@ def format_result(result: Dict[str, Any]) -> str:
     return result["summary"]
 
 
-def build_context(results: List[Dict[str, Any]], max_chars: int) -> str:
+def build_context(
+    results: List[Dict[str, Any]], max_chars: int, include_source_ids: bool
+) -> str:
     sections: List[str] = []
     total = 0
     for result in results:
-        section = result["summary"]
+        header = ""
+        if include_source_ids:
+            source_id = result.get("source_id")
+            header = f"source_id: {source_id}\n" if source_id else ""
+        section = f"{header}{result['summary']}"
         if total + len(section) > max_chars:
             remaining = max_chars - total
             if remaining > 0:
@@ -130,15 +136,44 @@ def build_context(results: List[Dict[str, Any]], max_chars: int) -> str:
     return "\n".join(sections).strip()
 
 
-def build_prompt(question: str, context: str) -> str:
+def build_prompt(question: str, context: str, require_json: bool) -> str:
+    instructions = (
+        "Answer the question using the provided context. "
+        "If the context is insufficient, say so and suggest what to ask next."
+    )
+    if require_json:
+        instructions = f"""{instructions}
+            If you can confidently pinpoint a single specific card from the context,
+            include its source_id in the response. Only use source_id values that
+            appear in the context. If not confident, set source_id to null.
+            Return only JSON with keys: answer (string), source_id (string|null)
+            """
     payload = {
         "role": "You help users find cards for Magic: The Gathering.",
+        "instructions": instructions,
+        "context": context,
+        "question": question,
+    }
+    logging.debug(payload)
+    return json.dumps(payload)
+
+
+def build_source_id_prompt(question: str, context: str, answer: str) -> str:
+    payload = {
+        "role": "You identify the best matching card from provided context.",
         "instructions": (
-            "Answer the question using the provided context. "
-            "If the context is insufficient, say so and suggest what to ask next."
+            """
+            Given the question, context, and answer, choose the single best
+            source_id if the answer clearly refers to one card.
+            Only use source_id values that appear in the context.
+            If not confident, set source_id to null.
+            Return only JSON with key: source_id (string|null).
+            Example response: { source_id: "77c6fa74-5543-42ac-9ead-0e890b188e99" }
+            """
         ),
         "context": context,
         "question": question,
+        "answer": answer,
     }
     logging.debug(payload)
     return json.dumps(payload)
@@ -151,10 +186,64 @@ def build_provider(config: Config) -> LLMProvider:
     raise ValueError(f"Unsupported LLM_PROVIDER: {config.llm_provider}")
 
 
-def cleanup_response(response: str) -> str:
-    text = response.replace('\\"', '"')
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+def _strip_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2:
+            return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def _extract_json_text(response: str) -> Optional[str]:
+    stripped = _strip_code_fence(response)
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return stripped[start : end + 1]
+    return None
+
+
+def parse_llm_response(response: str) -> tuple[str, Optional[str]]:
+    candidates = [response]
+    json_text = _extract_json_text(response)
+    if json_text:
+        candidates.append(json_text)
+    candidates.append(response.replace('\\"', '"'))
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            answer = payload.get("answer")
+            source_id = payload.get("source_id")
+            if isinstance(answer, str):
+                return answer.strip(), source_id if isinstance(source_id, str) else None
+    text = re.sub(r"\s+", " ", response).strip()
+    return text, None
+
+
+def parse_source_id_response(response: str) -> Optional[str]:
+    candidates = [response]
+    json_text = _extract_json_text(response)
+    if json_text:
+        candidates.append(json_text)
+    candidates.append(response.replace('\\"', '"'))
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            source_id = payload.get("source_id")
+            if isinstance(source_id, str):
+                return source_id
+            if source_id is None:
+                return None
+    return None
 
 
 def search(question: str, config: Config) -> Dict[str, Any]:
@@ -174,20 +263,21 @@ def search(question: str, config: Config) -> Dict[str, Any]:
     )
 
     if not results:
-        return {"results": [], "context": "", "answer": None}
+        return {"results": [], "context": "", "answer": None, "source_id": None}
 
-    context = build_context(results, config.max_context_chars)
+    context = build_context(results, config.max_context_chars, include_source_ids=True)
     if not context:
-        return {"results": results, "context": "", "answer": None}
+        return {"results": results, "context": "", "answer": None, "source_id": None}
 
-    prompt = build_prompt(question, context)
+    prompt = build_prompt(question, context, require_json=True)
     provider = build_provider(config)
     response = provider.generate(prompt)
-    clean_response = cleanup_response(response)
+    clean_response, source_id = parse_llm_response(response)
     return {
         "results": results,
         "context": context,
         "answer": clean_response,
+        "source_id": source_id,
         "answer_raw": response,
     }
 
@@ -209,27 +299,47 @@ def search_stream(question: str, config: Config) -> Iterator[Dict[str, Any]]:
     )
 
     if not results:
-        yield {"type": "meta", "results": [], "context": "", "answer": None}
+        yield {"type": "meta", "results": [], "context": ""}
         yield {"type": "done"}
         return
 
-    context = build_context(results, config.max_context_chars)
+    context = build_context(results, config.max_context_chars, include_source_ids=False)
     if not context:
-        yield {"type": "meta", "results": results, "context": "", "answer": None}
+        yield {"type": "meta", "results": results, "context": ""}
         yield {"type": "done"}
         return
 
-    prompt = build_prompt(question, context)
+    prompt = build_prompt(question, context, require_json=False)
     provider = build_provider(config)
-    yield {"type": "meta", "results": results, "context": context, "answer": None}
+    yield {"type": "meta", "results": results, "context": context}
 
+    streamed_parts: List[str] = []
+    had_error = False
     try:
         for chunk in provider.stream(prompt):
-            if chunk:
-                yield {"type": "chunk", "content": chunk}
+            streamed_parts.append(chunk)
+            yield {"type": "chunk", "content": chunk}
     except Exception as exc:  # pragma: no cover - depends on runtime service state
+        had_error = True
         yield {"type": "error", "message": str(exc)}
     finally:
+        if streamed_parts and not had_error:
+            full_response = "".join(streamed_parts)
+            source_context = build_context(
+                results, config.max_context_chars, include_source_ids=True
+            )
+            source_prompt = build_source_id_prompt(
+                question, source_context, full_response
+            )
+            try:
+                yield {"type": "seeking_card"}
+                source_id = provider.generate(source_prompt)
+                print(f"Source {source_id}")
+            except Exception as exc:  # pragma: no cover - depends on runtime service
+                yield {"type": "error", "message": str(exc)}
+                yield {"type": "done"}
+                return
+            yield {"type": "found_card", "id": source_id}
         yield {"type": "done"}
 
 

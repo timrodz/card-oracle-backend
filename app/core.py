@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 from typing import Any, Dict, Iterator
 
 from dotenv import load_dotenv
@@ -62,8 +63,30 @@ def search_rag_stream(query: str) -> Iterator[str]:
 
 async def fetch_card(id: str) -> Dict[str, Any]:
     collection = get_cards_collection()
-    query = {"_id": id}
+    normalized_id = _normalize_card_id(id)
+    query = {"$or": [{"_id": normalized_id}, {"source_id": normalized_id}]}
     card = await asyncio.to_thread(collection.find_one, query)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     return card
+
+
+def _normalize_card_id(raw_id: str) -> str:
+    value = raw_id.strip()
+
+    # Supports path values like `{source_id:uuid}` or `{source_id: uuid}`.
+    match = re.fullmatch(r"\{\s*source_id\s*:\s*([^}]+)\s*\}", value)
+    if match:
+        return match.group(1).strip().strip('"').strip("'")
+
+    # Supports JSON-like values such as `{"source_id":"uuid"}`.
+    if value.startswith("{") and value.endswith("}"):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return value
+        if isinstance(parsed, dict):
+            source_id = parsed.get("source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                return source_id.strip()
+    return value
