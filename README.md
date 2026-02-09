@@ -1,5 +1,11 @@
 # Card Oracle backend
 
+An application that lets users retrieve data about Magic: The Gathering cards
+
+![image](docs/architecture/high-level-architecture.png)
+
+![image](docs/architecture/application-features.png)
+
 ## Development Setup
 
 ### Environment
@@ -10,19 +16,30 @@
 - Ollama for LLM models (`ollama`)
 - Huggingface for transformers (via `uvx hf`)
 
-#### Transformers
+#### Transformer LLMs
 
-- Model: `mixedbread-ai/mxbai-embed-xsmall-v1` (via Sentence Transformers)
-  - Dimensions: 384 (Enough for short text)
+I'm [SentenceTransformers](https://sbert.net/) package.
+
+Constraints:
+
+- Transformer dimensions: `384`
+- Reasoning: The most relevant piece of information (oracle_text) is not long enough to require bigger dimensions
+
+Models:
+
+- `mixedbread-ai/mxbai-embed-xsmall-v1`. Results have been OK - Need more testing
+- `sentence-transformers/all-MiniLM-L6-v2`. Currently testing this model - unsure how good results will be.
 
 ```bash
 uvx hf auth login
-uvx hf download mixedbread-ai/mxbai-embed-xsmall-v1 --local-dir models/mixedbread-ai/mxbai-embed-xsmall-v1
+uvx hf download <model> --local-dir models/<model>
 ```
 
-#### LLMs
+#### RAG LLMs
 
 - Model: `mistral:7b` (via Ollama)
+
+Install:
 
 ```bash
 ollama run mistral
@@ -47,8 +64,8 @@ uv pip install -r requirements.txt
 
 Run the FastAPI server:
 
-```
-fastapi dev main.py
+```bash
+fastapi dev app/main.py
 ```
 
 ## Datasets
@@ -58,6 +75,10 @@ fastapi dev main.py
 ## Data Pipeline
 
 ### 1. Ingestion
+
+![image](docs/architecture/data-ingestion-pipeline.png)
+
+#### 1.1 Embeddings
 
 Load the JSON response into a collection. We will use this later for API endpoints and extra augmentation.
 
@@ -113,15 +134,12 @@ If the above went right, you're ready to run the entire ingestion pipeline:
 
 Note: This will take anywhere around 10 minutes on a Macbook with no GPU.
 
-Create the MongoDB search index:
+#### 1.2. Create vector search index
+
+In order to retrieve data using embeddings, we must create a search index for our vector
 
 ```bash
-> atlas local ls
-NAME                 MDB VER    STATE
-<DEPLOYMENT_NAME>    8.2.4      running
-# This command below doesn't work in Atlas 1.52, use the old one for now
-# > atlas local search indexes create --deploymentName <DEPLOYMENT> --file vector-index.json
-> atlas deployments search indexes create --file vector-index.json
+> atlas deployments search indexes create --file docs/vector-search-indexes/card_embeddings.json
 you're using an old search index definition
 Search index created with ID: 69884584b41ae52dc72ff971
 ```
@@ -129,15 +147,38 @@ Search index created with ID: 69884584b41ae52dc72ff971
 Verify the index setup worked:
 
 ```bash
+> atlas local ls
+NAME                 MDB VER    STATE
+<DEPLOYMENT_NAME>    8.2.4      running
 > atlas local search indexes list --deploymentName <DEPLOYMENT> --output json --db mtg --collection card_embeddings
 {"outcome":"success","indexes":[{"id":"698842c3b41ae52dc72ff96f","name":"vector_index","database":"mtg","collectionName":"card_embeddings","status":"READY","type":"vectorSearch"}]}
 ```
 
-### 2. Query (RAG)
+### 2. Retrieval
 
-Use the local Sentence Transformers embedder for the query, run vector search, and
-have Ollama answer with retrieved context:
+![image](docs/architecture/data-retrieval-pipeline.png)
+
+Use the local Sentence Transformers embedder for the query, run vector search, and have Ollama answer with retrieved context:
 
 ```bash
 > python -m app.data_pipeline.query_rag "Which cards care about Phyrexians?"
+2026-02-09 21:03:36,349 INFO Loading embedding model from path: models/sentence-transformers/all-MiniLM-L6-v2 (device=cpu)
+"...Output from transformer setup..."
+2026-02-09 21:03:50,870 INFO HTTP Request: POST http://127.0.0.1:11434/api/generate "HTTP/1.1 200 OK"
+2026-02-09 21:03:50,875 INFO Top 5 results:
+2026-02-09 21:03:50,875 INFO
+Card Name: Phyrexian Obliterator // Phyrexian Obliterator. Type: Card // Card. Set: Phyrexia: All Will Be One Art Series. (CMC or mana value 0.0). Abilities: None.
+2026-02-09 21:03:50,875 INFO
+Card Name: Prologue to Phyresis. Type: Instant. Set: Phyrexia: All Will Be One. Cost: 1 U (CMC or mana value 2.0). Abilities: Each opponent gets a poison counter. Draw a card..
+2026-02-09 21:03:50,875 INFO
+Card Name: Long-Term Phyresis Study. Type: Enchantment. Set: Unknown Event. Cost: 2 B (CMC or mana value 3.0). Abilities: Poison Tolerance +1 (It takes an additional poison counter for you to lose the game to poison.) When Long-Term Phyresis Study enters the battlefield, return up to one target creature card from your graveyard to your hand. Then, draw a card..
+2026-02-09 21:03:50,875 INFO
+Card Name: Strictly Better // Strictly Better (cont'd). Type: Card // Card. Set: Phyrexia: All Will Be One Minigames. (CMC or mana value 0.0). Abilities: None.
+2026-02-09 21:03:50,875 INFO
+Card Name: Phyrexian Beast. Type: Token Creature — Phyrexian Beast. Set: Phyrexia: All Will Be One Tokens. (CMC or mana value 0.0). Abilities: Toxic 1 (Players dealt combat damage by this creature also get a poison counter.).
+
+---
+RAG Response
+---
+In the provided context, the cards that care about Phyrexians are: 1. Phyrexian Obliterator // Phyrexian Obliterator: This card is a Phyrexian card. 2. Phyrexia: All Will Be One Art Series (Set): This set includes the Phyrexian Obliterator card, suggesting it might have more Phyrexian cards. 3. Prologue to Phyresis: While not explicitly a Phyrexian card, it is from the Phyrexia: All Will Be One set and causes opponents to get poison counters, which is a mechanism often associated with Phyrexians. 4. Long-Term Phyresis Study: This enchantment gives Poison Tolerance +1, which can be seen as caring about Phyrexians due to the association of Phyrexians with poison counters. 5. Phyrexia: All Will Be One Tokens (Set): This set includes tokens like Phyrexian Beast that have the Toxic ability, which deals poison counter damage. 6. Strictly Better // Strictly Better (cont'd): While not explicitly a Phyrexian card, it is from the Phyrexia: All Will Be One Minigames set, suggesting it might be related to Phyrexians in some way.
 ```
