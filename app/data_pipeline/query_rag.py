@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -125,11 +126,16 @@ def build_context(results: List[Dict[str, Any]], max_chars: int) -> str:
 
 
 def build_prompt(question: str, context: str) -> str:
-    return f"""
-You are a helpful Magic: The Gathering rules assistant. Answer the question using the context below. If the context is insufficient, say so and suggest what to ask next.
-Context: {context}
-Question: {question}
-"""
+    payload = {
+        "role": "Magic: The Gathering rules assistant",
+        "instructions": (
+            "Answer the question using the provided context. "
+            "If the context is insufficient, say so and suggest what to ask next."
+        ),
+        "context": context,
+        "question": question,
+    }
+    return json.dumps(payload)
 
 
 def build_provider(config: Config) -> LLMProvider:
@@ -139,16 +145,22 @@ def build_provider(config: Config) -> LLMProvider:
     raise ValueError(f"Unsupported LLM_PROVIDER: {config.llm_provider}")
 
 
-def query_rag(question: str, config: Config) -> Dict[str, Any]:
+def cleanup_response(response: str) -> str:
+    text = response.replace('\\"', '"')
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def query(question: str, config: Config) -> Dict[str, Any]:
     embedder = load_embedder(config.embed_model, config.embed_model_path)
-    query_vector = embed_query(embedder, question, config.normalize_embeddings)
+    query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
 
     client: MongoClient = MongoClient(config.mongodb_uri)
     collection = client[config.mongodb_db][config.mongodb_collection]
 
     results = vector_search(
         collection,
-        query_vector,
+        query_embeddings,
         config.vector_index,
         config.vector_path,
         config.num_candidates,
@@ -165,7 +177,13 @@ def query_rag(question: str, config: Config) -> Dict[str, Any]:
     prompt = build_prompt(question, context)
     provider = build_provider(config)
     response = provider.generate(prompt)
-    return {"results": results, "context": context, "answer": response}
+    clean_response = cleanup_response(response)
+    return {
+        "results": results,
+        "context": context,
+        "answer": clean_response,
+        "answer_raw": response,
+    }
 
 
 def log_results(results: List[Dict[str, Any]]) -> None:
@@ -201,7 +219,7 @@ def main() -> None:
         raise SystemExit("Question is required. Provide it as an argument.")
 
     config = load_config()
-    result = query_rag(question, config)
+    result = query(question, config)
     results = result["results"]
     if not results:
         logging.info("No results found for query.")

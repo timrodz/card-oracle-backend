@@ -32,7 +32,7 @@ async def search_rag(query: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        result = await asyncio.to_thread(query_rag.query_rag, query, config)
+        result = await asyncio.to_thread(query_rag.query, query, config)
     except Exception as exc:  # pragma: no cover - depends on external services
         raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
 
