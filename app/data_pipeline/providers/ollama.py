@@ -36,3 +36,20 @@ class OllamaProvider(LLMProvider):
             raise RuntimeError(f"ollama generate failed: {exc}") from exc
 
         return result.response
+
+    def stream(self, prompt: str):
+        try:
+            logging.debug(f"Stream:{prompt}")
+            stream = self._client.chat(
+                model=self._model,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True,
+            )
+        except Exception as exc:  # pragma: no cover - depends on runtime service state
+            raise RuntimeError(f"ollama chat stream failed: {exc}") from exc
+
+        for chunk in stream:
+            message = chunk.message
+            text = message.content
+            if text:
+                yield text

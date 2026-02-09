@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -184,6 +184,47 @@ def query(question: str, config: Config) -> Dict[str, Any]:
         "answer": clean_response,
         "answer_raw": response,
     }
+
+
+def query_stream(question: str, config: Config) -> Iterator[Dict[str, Any]]:
+    embedder = load_embedder(config.embed_model, config.embed_model_path)
+    query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
+
+    client: MongoClient = MongoClient(config.mongodb_uri)
+    collection = client[config.mongodb_db][config.mongodb_collection]
+
+    results = vector_search(
+        collection,
+        query_embeddings,
+        config.vector_index,
+        config.vector_path,
+        config.num_candidates,
+        config.limit,
+    )
+
+    if not results:
+        yield {"type": "meta", "results": [], "context": "", "answer": None}
+        yield {"type": "done"}
+        return
+
+    context = build_context(results, config.max_context_chars)
+    if not context:
+        yield {"type": "meta", "results": results, "context": "", "answer": None}
+        yield {"type": "done"}
+        return
+
+    prompt = build_prompt(question, context)
+    provider = build_provider(config)
+    yield {"type": "meta", "results": results, "context": context, "answer": None}
+
+    try:
+        for chunk in provider.stream(prompt):
+            if chunk:
+                yield {"type": "chunk", "content": chunk}
+    except Exception as exc:  # pragma: no cover - depends on runtime service state
+        yield {"type": "error", "message": str(exc)}
+    finally:
+        yield {"type": "done"}
 
 
 def log_results(results: List[Dict[str, Any]]) -> None:

@@ -1,7 +1,8 @@
 import asyncio
+import json
 import os
 import urllib.parse
-from typing import Any, Dict
+from typing import Any, Dict, Iterator
 
 from dotenv import load_dotenv
 from fastapi import HTTPException
@@ -32,15 +33,38 @@ async def search_rag(query: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        result = await asyncio.to_thread(query_rag.query, query, config)
+        result = await asyncio.to_thread(query_rag.query, encoded_query, config)
     except Exception as exc:  # pragma: no cover - depends on external services
         raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
 
-    return {
-        "query": query,
-        "encoded_query": encoded_query,
-        **result,
-    }
+    return result
+
+
+def _encode_sse(event: Dict[str, Any]) -> str:
+    payload = json.dumps(event)
+    return f"data: {payload}\n\n"
+
+
+def search_rag_stream(query: str) -> Iterator[str]:
+    encoded_query = urllib.parse.urlencode(
+        {"query": query},
+        quote_via=urllib.parse.quote,
+    )
+    try:
+        config = query_rag.load_config()
+    except ValueError as exc:
+        yield _encode_sse({"type": "error", "message": str(exc), "query": query})
+        yield _encode_sse({"type": "done"})
+        return
+
+    try:
+        for event in query_rag.query_stream(encoded_query, config):
+            yield _encode_sse(event)
+    except Exception as exc:  # pragma: no cover - depends on external services
+        yield _encode_sse(
+            {"type": "error", "message": f"Search failed: {exc}", "query": query}
+        )
+        yield _encode_sse({"type": "done"})
 
 
 async def fetch_card(id: str) -> Dict[str, Any]:
