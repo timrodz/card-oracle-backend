@@ -45,8 +45,8 @@ async def search_rag(query: str) -> Dict[str, Any]:
 
 async def fetch_card(id: str) -> Dict[str, Any]:
     collection = get_cards_collection()
-    query = {"id": id}
-    card = await asyncio.to_thread(collection.find_one, query, {"_id": 0})
+    query = {"_id": id}
+    card = await asyncio.to_thread(collection.find_one, query)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     return card
