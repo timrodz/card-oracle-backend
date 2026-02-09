@@ -127,7 +127,7 @@ def build_context(results: List[Dict[str, Any]], max_chars: int) -> str:
 
 def build_prompt(question: str, context: str) -> str:
     payload = {
-        "role": "Magic: The Gathering rules assistant",
+        "role": "You help users find cards for Magic: The Gathering.",
         "instructions": (
             "Answer the question using the provided context. "
             "If the context is insufficient, say so and suggest what to ask next."
@@ -135,6 +135,7 @@ def build_prompt(question: str, context: str) -> str:
         "context": context,
         "question": question,
     }
+    logging.debug(payload)
     return json.dumps(payload)
 
 
