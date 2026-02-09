@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover - torch is a dependency of sentence-tran
     torch_module = None
 
 
-def load_embedder(model_name: str, model_path: str) -> SentenceTransformer:
+def load_transformer(model_name: str, model_path: str) -> SentenceTransformer:
     device = "cpu"
     if torch_module is not None and torch_module.cuda.is_available():
         device = "cuda"

@@ -30,7 +30,7 @@ class OllamaProvider(LLMProvider):
 
     def generate(self, prompt: str) -> str:
         try:
-            logging.debug(f"Generate:{prompt}")
+            logging.info(f"Generate:{prompt}")
             result = self._client.generate(model=self._model, prompt=prompt)
         except Exception as exc:  # pragma: no cover - depends on runtime service state
             raise RuntimeError(f"ollama generate failed: {exc}") from exc
@@ -39,7 +39,7 @@ class OllamaProvider(LLMProvider):
 
     def stream(self, prompt: str):
         try:
-            logging.debug(f"Stream:{prompt}")
+            logging.info(f"Stream:{prompt}")
             stream = self._client.chat(
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],

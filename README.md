@@ -150,8 +150,20 @@ Verify the index setup worked:
 > atlas local ls
 NAME                 MDB VER    STATE
 <DEPLOYMENT_NAME>    8.2.4      running
-> atlas local search indexes list --deploymentName <DEPLOYMENT> --output json --db mtg --collection card_embeddings
-{"outcome":"success","indexes":[{"id":"698842c3b41ae52dc72ff96f","name":"vector_index","database":"mtg","collectionName":"card_embeddings","status":"READY","type":"vectorSearch"}]}
+> atlas local search indexes list --deploymentName <DEPLOYMENT> --db mtg --collection card_embeddings
+ID      NAME            DATABASE    COLLECTION         STATUS    TYPE
+<ID>    vector_index    mtg         card_embeddings    READY     vectorSearch
+```
+
+Note: If you need to delete the index:
+
+```bash
+atlas local search indexes delete --deploymentName <DEPLOYMENT>
+> Database? db
+> Collection? card_embeddings
+> Search Index Name? vector_index
+> Are you sure you want to delete search index 'vector_index'? Yes
+Index 'vector_index' deleted
 ```
 
 ### 2. Retrieval

@@ -9,9 +9,12 @@ from typing import Any, Dict, Iterator, List, Optional
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
-from app.data_pipeline.embeddings import embed_text, load_embedder
 from app.data_pipeline.providers.ollama import OllamaProvider
-from app.data_pipeline.providers.provider import LLMProvider  # noqa: E402
+from app.data_pipeline.providers.provider import LLMProvider
+from app.data_pipeline.sentence_transformers import (
+    embed_text,
+    load_transformer,
+)
 
 
 @dataclass
@@ -19,7 +22,7 @@ class Config:
     mongodb_uri: str
     mongodb_db: str
     mongodb_collection: str
-    embed_model: str
+    embed_model_name: str
     embed_model_path: str
     normalize_embeddings: bool
     vector_index: str
@@ -45,7 +48,7 @@ def load_config() -> Config:
         mongodb_collection=os.getenv(
             "MONGODB_COLLECTION_EMBEDDINGS", "card_embeddings"
         ),
-        embed_model=os.getenv(
+        embed_model_name=os.getenv(
             "EMBED_MODEL_NAME", "mixedbread-ai/mxbai-embed-xsmall-v1"
         ),
         embed_model_path=os.getenv(
@@ -90,9 +93,7 @@ def vector_search(
                 "index": vector_index,
                 "queryVector": query_vector,
                 "path": vector_path,
-                # Either numCandidates or exact must be present, not both
-                # "numCandidates": num_candidates,
-                "exact": True,
+                "numCandidates": num_candidates,
                 "limit": limit,
             }
         },
@@ -105,7 +106,9 @@ def vector_search(
             }
         },
     ]
-    return list(collection.aggregate(pipeline))
+    results = list(collection.aggregate(pipeline))
+    logging.info(f"results: {results}")
+    return results
 
 
 def format_result(result: Dict[str, Any]) -> str:
@@ -155,7 +158,7 @@ def cleanup_response(response: str) -> str:
 
 
 def search(question: str, config: Config) -> Dict[str, Any]:
-    embedder = load_embedder(config.embed_model, config.embed_model_path)
+    embedder = load_transformer(config.embed_model_name, config.embed_model_path)
     query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
 
     client: MongoClient = MongoClient(config.mongodb_uri)
@@ -190,7 +193,7 @@ def search(question: str, config: Config) -> Dict[str, Any]:
 
 
 def search_stream(question: str, config: Config) -> Iterator[Dict[str, Any]]:
-    embedder = load_embedder(config.embed_model, config.embed_model_path)
+    embedder = load_transformer(config.embed_model_name, config.embed_model_path)
     query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
 
     client: MongoClient = MongoClient(config.mongodb_uri)

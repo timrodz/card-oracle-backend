@@ -11,7 +11,10 @@ from typing import Any, Dict, Iterator, List, Optional
 from dotenv import load_dotenv
 from pymongo import MongoClient, ReplaceOne
 
-from app.data_pipeline.embeddings import embed_text, load_embedder
+from app.data_pipeline.sentence_transformers import (
+    embed_text,
+    load_transformer,
+)
 
 
 @dataclass
@@ -20,8 +23,8 @@ class Config:
     mongodb_uri: str
     mongodb_db: str
     mongodb_collection: str
-    model_name: str
-    model_path: str
+    embed_model_name: str
+    embed_model_path: str
     mongo_batch_size: int
     normalize_embeddings: bool
 
@@ -47,8 +50,8 @@ def load_config() -> Config:
         mongodb_uri=mongodb_uri,
         mongodb_db=mongodb_db,
         mongodb_collection=mongodb_collection,
-        model_name=model_name,
-        model_path=model_path,
+        embed_model_name=model_name,
+        embed_model_path=model_path,
         mongo_batch_size=mongo_batch_size,
         normalize_embeddings=normalize_embeddings,
     )
@@ -88,11 +91,8 @@ def load_raw_cards(
 
 
 def select_and_validate_fields(raw_card: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    oracle_text = raw_card.get("oracle_text")
-    if not oracle_text or not isinstance(oracle_text, str) or not oracle_text.strip():
-        oracle_text = None
-
-    prices = raw_card.get("prices") or {}
+    oracle_text = raw_card.get("oracle_text", "")
+    prices = raw_card.get("prices", {})
     price_usd = prices.get("usd") if isinstance(prices, dict) else None
     return {
         "id": raw_card.get("id"),
@@ -100,7 +100,7 @@ def select_and_validate_fields(raw_card: Dict[str, Any]) -> Optional[Dict[str, A
         "collector_number": raw_card.get("collector_number"),
         "type_line": raw_card.get("type_line"),
         "rarity": raw_card.get("rarity"),
-        "oracle_text": oracle_text,
+        "oracle_text": normalize_text(oracle_text),
         "flavor_text": raw_card.get("flavor_text"),
         "price_usd": price_usd,
         "cmc": raw_card.get("cmc"),
@@ -115,19 +115,34 @@ def _is_empty_face(face: Dict[str, Any]) -> bool:
     color_identity = face.get("color_identity")
     keywords = face.get("keywords")
     mana_cost = face.get("mana_cost")
-    return (
-        cmc == 0
-        and isinstance(colors, list)
-        and len(colors) == 0
-        and isinstance(color_identity, list)
-        and len(color_identity) == 0
-        and isinstance(keywords, list)
-        and len(keywords) == 0
-        and mana_cost == ""
+
+    is_empty_cmc = cmc == 0 if cmc is not None else True
+    is_empty_colors = isinstance(colors, list) and len(colors) == 0
+    is_empty_color_identity = (
+        isinstance(color_identity, list) and len(color_identity) == 0
+        if color_identity is not None
+        else True
     )
+    is_empty_keywords = (
+        isinstance(keywords, list) and len(keywords) == 0
+        if keywords is not None
+        else True
+    )
+    is_empty_mana_cost = mana_cost == "" if mana_cost is not None else True
+    is_empty = (
+        is_empty_cmc
+        and is_empty_colors
+        and is_empty_color_identity
+        and is_empty_keywords
+        and is_empty_mana_cost
+    )
+    # logging.info(
+    #     f"Is empty {face.get('name')}: {is_empty}. CMC: {is_empty_cmc}. Mana_cost: {is_empty_mana_cost}. C:{is_empty_colors} CI:{is_empty_color_identity} K:{is_empty_keywords}\n\n{face}\n\n"
+    # )
+    return is_empty
 
 
-def _should_filter_card(raw_card: Dict[str, Any]) -> bool:
+def _should_filter_out_empty_card(raw_card: Dict[str, Any]) -> bool:
     type_line = raw_card.get("type_line")
     if type_line not in {"Card", "Card // Card"}:
         return False
@@ -197,7 +212,6 @@ def embed_chunks(
     model,
     chunk_records: List[Dict[str, Any]],
     normalize_embeddings: bool,
-    model_name: str,
 ) -> List[Dict[str, Any]]:
     for record in chunk_records:
         record["embeddings"] = embed_text(
@@ -217,27 +231,25 @@ def upsert_embeddings(collection, records: List[Dict[str, Any]]) -> None:
 
 
 def run_pipeline(config: Config, limit: Optional[int]) -> None:
-    model = load_embedder(config.model_name, config.model_path)
+    model = load_transformer(config.embed_model_name, config.embed_model_path)
 
     client: MongoClient = MongoClient(config.mongodb_uri)
     collection = client[config.mongodb_db][config.mongodb_collection]
 
     total_cards = 0
-    missing_oracle_text = 0
+    total_empty_cards = 0
     total_chunks = 0
     buffer: List[Dict[str, Any]] = []
 
     for raw_card in load_raw_cards(config.dataset_path, limit):
         total_cards += 1
-        if _should_filter_card(raw_card):
+        if _should_filter_out_empty_card(raw_card):
+            logging.debug(f"Empty card {raw_card.get('id')}: {raw_card.get('name')}")
+            total_empty_cards += 1
             continue
         card = select_and_validate_fields(raw_card)
         if card is None:
             continue
-
-        card["oracle_text"] = normalize_text(card["oracle_text"])
-        if not card["oracle_text"]:
-            missing_oracle_text += 1
 
         record = build_card_record(card)
         buffer.append(record)
@@ -248,7 +260,6 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
                 model,
                 buffer,
                 config.normalize_embeddings,
-                config.model_name,
             )
             upsert_embeddings(collection, embedded)
             logging.info("Upserted %d chunks", len(buffer))
@@ -259,13 +270,12 @@ def run_pipeline(config: Config, limit: Optional[int]) -> None:
             model,
             buffer,
             config.normalize_embeddings,
-            config.model_name,
         )
         upsert_embeddings(collection, embedded)
         logging.info("Upserted %d chunks", len(buffer))
 
     logging.info("Total cards read: %d", total_cards)
-    logging.info("Total cards missing oracle_text: %d", missing_oracle_text)
+    logging.info("Total empty cards: %d", total_empty_cards)
     logging.info("Total chunks created: %d", total_chunks)
 
 
