@@ -59,6 +59,8 @@ def search_rag_stream(query: str) -> Iterator[str]:
 
     try:
         for event in query_rag.query_stream(encoded_query, config):
+            if event["type"] == "meta":
+                print(event)
             yield _encode_sse(event)
     except Exception as exc:  # pragma: no cover - depends on external services
         yield _encode_sse(
