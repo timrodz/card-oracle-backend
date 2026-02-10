@@ -1,0 +1,16 @@
+[project]
+name = "mtg-cards-oracle-backend"
+version = "0.1.0"
+description = "A FastAPI backend application that helps users find cards for MTG using RAG search."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "fastapi[standard]>=0.128.7",
+    "mypy>=1.19.1",
+    "ollama>=0.6.1",
+    "pydantic>=2.12.5",
+    "pymongo>=4.16.0",
+    "ruff>=0.15.0",
+    "sentence-transformers>=5.2.2",
+]
