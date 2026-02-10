@@ -1,12 +1,13 @@
 import argparse
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from dotenv import load_dotenv
+from pydantic import ValidationError
 from pymongo import MongoClient, ReplaceOne
+
+from app.settings import get_settings
 
 
 def setup_logging() -> None:
@@ -17,16 +18,17 @@ def setup_logging() -> None:
 
 
 def load_config() -> Dict[str, Any]:
-    load_dotenv(dotenv_path=".env")
-    mongodb_uri = os.getenv("MONGODB_URI")
-    if not mongodb_uri:
-        raise ValueError("MONGODB_URI is required in the environment")
+    try:
+        settings = get_settings()
+    except ValidationError as exc:
+        raise ValueError(str(exc)) from exc
+
     return {
-        "dataset_path": Path(os.getenv("SCRYFALL_DATASET_PATH", "datasets/scryfall")),
-        "mongodb_uri": mongodb_uri,
-        "mongodb_db": os.getenv("MONGODB_DB", "mtg"),
-        "mongodb_collection": os.getenv("MONGODB_COLLECTION", "cards"),
-        "mongo_batch_size": int(os.getenv("MONGO_BATCH_SIZE", "500")),
+        "dataset_path": Path(settings.scryfall_dataset_path),
+        "mongodb_uri": settings.mongodb_uri,
+        "mongodb_db": settings.mongodb_db,
+        "mongodb_collection": settings.mongodb_collection,
+        "mongo_batch_size": settings.mongo_batch_size,
     }
 
 

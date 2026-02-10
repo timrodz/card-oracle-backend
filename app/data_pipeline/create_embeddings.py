@@ -1,16 +1,16 @@
 import argparse
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from dotenv import load_dotenv
+from pydantic import ValidationError
 from pymongo import MongoClient, ReplaceOne
 
+from app.settings import get_settings
 from app.data_pipeline.sentence_transformers import (
     embed_text,
     load_transformer,
@@ -30,30 +30,20 @@ class Config:
 
 
 def load_config() -> Config:
-    load_dotenv(dotenv_path=".env")
-    dataset_path = Path(os.getenv("SCRYFALL_DATASET_PATH", "datasets/scryfall"))
-    mongodb_uri = os.getenv("MONGODB_URI")
-    if not mongodb_uri:
-        raise ValueError("MONGODB_URI is required in the environment")
-
-    mongodb_db = os.getenv("MONGODB_DB", "mtg")
-    mongodb_collection = os.getenv("MONGODB_COLLECTION_EMBEDDINGS", "card_embeddings")
-    model_name = os.getenv("EMBED_MODEL_NAME", "mixedbread-ai/mxbai-embed-xsmall-v1")
-    model_path = os.getenv(
-        "EMBED_MODEL_PATH", "models/mixedbread-ai/mxbai-embed-xsmall-v1"
-    )
-    mongo_batch_size = int(os.getenv("MONGO_BATCH_SIZE", "500"))
-    normalize_embeddings = os.getenv("NORMALIZE_EMBEDDINGS", "true").lower() == "true"
+    try:
+        settings = get_settings()
+    except ValidationError as exc:
+        raise ValueError(str(exc)) from exc
 
     return Config(
-        dataset_path=dataset_path,
-        mongodb_uri=mongodb_uri,
-        mongodb_db=mongodb_db,
-        mongodb_collection=mongodb_collection,
-        embed_model_name=model_name,
-        embed_model_path=model_path,
-        mongo_batch_size=mongo_batch_size,
-        normalize_embeddings=normalize_embeddings,
+        dataset_path=Path(settings.scryfall_dataset_path),
+        mongodb_uri=settings.mongodb_uri,
+        mongodb_db=settings.mongodb_db,
+        mongodb_collection=settings.mongodb_collection_embeddings,
+        embed_model_name=settings.embed_model_name,
+        embed_model_path=settings.embed_model_path,
+        mongo_batch_size=settings.mongo_batch_size,
+        normalize_embeddings=settings.normalize_embeddings,
     )
 
 

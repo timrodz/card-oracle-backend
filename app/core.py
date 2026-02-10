@@ -1,31 +1,29 @@
 import asyncio
 import json
-import os
 import re
 from typing import Any, Dict, Iterator
 
-from dotenv import load_dotenv
 from fastapi import HTTPException
+from pydantic import ValidationError
 from pymongo import MongoClient
 
 from app.data_pipeline import query_rag
-
-load_dotenv(dotenv_path=".env")
+from app.settings import get_settings
 
 
 def get_cards_collection():
-    mongodb_uri = os.getenv("MONGODB_URI")
-    if not mongodb_uri:
-        raise HTTPException(status_code=500, detail="MONGODB_URI is required")
-    mongodb_db = os.getenv("MONGODB_DB", "mtg")
-    client: MongoClient = MongoClient(mongodb_uri)
-    return client[mongodb_db]["cards"]
+    try:
+        settings = get_settings()
+    except ValidationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    client: MongoClient = MongoClient(settings.mongodb_uri)
+    return client[settings.mongodb_db][settings.mongodb_collection]
 
 
 async def search_rag(query: str) -> Dict[str, Any]:
     try:
         config = query_rag.load_config()
-    except ValueError as exc:
+    except (ValidationError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
@@ -44,7 +42,7 @@ def _encode_sse(event: Dict[str, Any]) -> str:
 def search_rag_stream(query: str) -> Iterator[str]:
     try:
         config = query_rag.load_config()
-    except ValueError as exc:
+    except (ValidationError, ValueError) as exc:
         yield _encode_sse({"type": "error", "message": str(exc), "query": query})
         yield _encode_sse({"type": "done"})
         return

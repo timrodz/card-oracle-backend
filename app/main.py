@@ -1,18 +1,15 @@
-import os
-
-from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from app.core import fetch_card, search_rag, search_rag_stream
-
-load_dotenv(dotenv_path=".env")
+from app.settings import get_settings
 
 app = FastAPI()
 
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+settings = get_settings()
+cors_origins = settings.cors_origins
 origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
 if origins:
     app.add_middleware(

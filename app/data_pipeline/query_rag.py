@@ -1,12 +1,11 @@
 import argparse
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Optional
 
-from dotenv import load_dotenv
+from pydantic import ValidationError
 from pymongo import MongoClient
 
 from app.data_pipeline.providers.ollama import OllamaProvider
@@ -15,6 +14,7 @@ from app.data_pipeline.sentence_transformers import (
     embed_text,
     load_transformer,
 )
+from app.settings import get_settings
 
 
 @dataclass
@@ -37,34 +37,27 @@ class Config:
 
 
 def load_config() -> Config:
-    load_dotenv(dotenv_path=".env")
-    mongodb_uri = os.getenv("MONGODB_URI")
-    if not mongodb_uri:
-        raise ValueError("MONGODB_URI is required in the environment")
+    try:
+        settings = get_settings()
+    except ValidationError as exc:
+        raise ValueError(str(exc)) from exc
 
     return Config(
-        mongodb_uri=mongodb_uri,
-        mongodb_db=os.getenv("MONGODB_DB", "mtg"),
-        mongodb_collection=os.getenv(
-            "MONGODB_COLLECTION_EMBEDDINGS", "card_embeddings"
-        ),
-        embed_model_name=os.getenv(
-            "EMBED_MODEL_NAME", "mixedbread-ai/mxbai-embed-xsmall-v1"
-        ),
-        embed_model_path=os.getenv(
-            "EMBED_MODEL_PATH", "models/mixedbread-ai/mxbai-embed-xsmall-v1"
-        ),
-        normalize_embeddings=os.getenv("NORMALIZE_EMBEDDINGS", "true").lower()
-        == "true",
-        vector_index=os.getenv("VECTOR_INDEX_NAME", "vector_index"),
-        vector_path=os.getenv("VECTOR_EMBED_PATH", "embeddings"),
-        num_candidates=int(os.getenv("VECTOR_NUM_CANDIDATES", "100")),
-        limit=int(os.getenv("VECTOR_LIMIT", "5")),
-        llm_provider=os.getenv("LLM_PROVIDER", "ollama"),
-        llm_model=os.getenv("LLM_MODEL", "mistral"),
-        llm_endpoint=os.getenv("LLM_ENDPOINT"),
-        max_context_chars=int(os.getenv("RAG_MAX_CONTEXT_CHARS", "4000")),
-        llm_timeout=int(os.getenv("LLM_TIMEOUT", "120")),
+        mongodb_uri=settings.mongodb_uri,
+        mongodb_db=settings.mongodb_db,
+        mongodb_collection=settings.mongodb_collection_embeddings,
+        embed_model_name=settings.embed_model_name,
+        embed_model_path=settings.embed_model_path,
+        normalize_embeddings=settings.normalize_embeddings,
+        vector_index=settings.vector_index_name,
+        vector_path=settings.vector_embed_path,
+        num_candidates=settings.vector_num_candidates,
+        limit=settings.vector_limit,
+        llm_provider=settings.llm_provider,
+        llm_model=settings.llm_model,
+        llm_endpoint=settings.llm_endpoint,
+        max_context_chars=settings.rag_max_context_chars,
+        llm_timeout=settings.llm_timeout,
     )
 
 
