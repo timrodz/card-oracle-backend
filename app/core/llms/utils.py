@@ -52,12 +52,17 @@ def parse_source_id_response(response: str) -> Optional[str]:
     return payload.source_id
 
 
-def build_provider() -> LLMProvider:
-    provider = llm_settings.llm_provider.lower()
+def get_llm_provider() -> LLMProvider:
+    provider = llm_settings.provider
     if provider == "ollama":
         return OllamaProvider(
-            llm_settings.llm_model,
-            llm_settings.llm_timeout,
-            llm_settings.llm_endpoint,
+            llm_settings.model_name,
+            llm_settings.timeout_seconds,
+            llm_settings.endpoint,
         )
-    raise ValueError(f"Unsupported LLM_PROVIDER: {llm_settings.llm_provider}")
+    raise ValueError(f"Unsupported LLM_PROVIDER: {llm_settings.provider}")
+
+
+if __name__ == "__main__":
+    prov = get_llm_provider()
+    prov.generate("What is 2 + 2?")

@@ -7,7 +7,7 @@ from loguru import logger
 from app.core.config import llm_settings, transformer_settings
 from app.core.db import database
 from app.core.llms.utils import (
-    build_provider,
+    get_llm_provider,
     parse_llm_response,
     parse_source_id_response,
 )
@@ -134,7 +134,6 @@ class RagSearch:
         return json.dumps(payload)
 
     def search(self, question: str) -> SearchResponse:
-
         embedder = load_transformer()
         query_embeddings = embed_text(
             model=embedder,
@@ -169,7 +168,7 @@ class RagSearch:
         prompt = self.__build_prompt(
             question=question, context=context, require_json=True
         )
-        provider = build_provider()
+        provider = get_llm_provider()
         response = provider.generate(prompt)
         clean_response, source_id = parse_llm_response(response)
         return SearchResponse(
@@ -213,7 +212,7 @@ class RagSearch:
         prompt = self.__build_prompt(
             question=question, context=context, require_json=False
         )
-        provider = build_provider()
+        provider = get_llm_provider()
         yield StreamMetaEvent(type="meta", results=results, context=context).model_dump(
             exclude_none=True
         )
@@ -259,13 +258,7 @@ def main() -> None:
         dest="question_flag",
         help="User question (explicit flag form)",
     )
-    parser.add_argument(
-        "--debug-config",
-        action="store_true",
-        help="Print the resolved config and exit.",
-    )
     args = parser.parse_args()
-
     question = args.question_flag or args.question
     if not question:
         raise SystemExit("Question is required. Provide it as an argument.")

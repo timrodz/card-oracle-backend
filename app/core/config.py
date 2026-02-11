@@ -1,7 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
+from loguru import logger
 from pydantic import AfterValidator, BaseModel, MongoDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,6 +14,7 @@ def _validate_json_file_type(value: Path) -> Path:
 
 
 JsonFilePath = Annotated[Path, AfterValidator(_validate_json_file_type)]
+LlmProviderName = Literal["ollama"]
 
 
 class DatasetFileInput(BaseModel):
@@ -41,10 +43,10 @@ class TransformerSettings(BaseModel):
 
 class LlmSettings(BaseModel):
     rag_max_context_chars: int
-    llm_provider: str
-    llm_model: str
-    llm_endpoint: str | None
-    llm_timeout: int
+    provider: LlmProviderName
+    model_name: str
+    endpoint: str | None
+    timeout_seconds: int
 
 
 class AppSettings(BaseModel):
@@ -78,10 +80,10 @@ class Settings(BaseSettings):
     transformers_vector_limit: int = 5
 
     llm_rag_max_context_chars: int = 4000
-    llm_provider: str = "ollama"
-    llm_model: str = "mistral"
+    llm_provider: LlmProviderName = "ollama"
+    llm_model_name: str = "mistral"
     llm_endpoint: str | None = None
-    llm_timeout: int = 120
+    llm_timeout_seconds: int = 120
 
     @property
     def database_settings(self) -> DatabaseSettings:
@@ -113,10 +115,10 @@ class Settings(BaseSettings):
     def llm_settings(self) -> LlmSettings:
         return LlmSettings(
             rag_max_context_chars=self.llm_rag_max_context_chars,
-            llm_provider=self.llm_provider,
-            llm_model=self.llm_model,
-            llm_endpoint=self.llm_endpoint,
-            llm_timeout=self.llm_timeout,
+            provider=self.llm_provider,
+            model_name=self.llm_model_name,
+            endpoint=self.llm_endpoint,
+            timeout_seconds=self.llm_timeout_seconds,
         )
 
     @property
@@ -135,3 +137,5 @@ db_settings = _settings.database_settings
 path_settings = _settings.path_settings
 transformer_settings = _settings.transformer_settings
 llm_settings = _settings.llm_settings
+
+logger.info(_settings)
