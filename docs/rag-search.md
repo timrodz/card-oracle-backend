@@ -46,7 +46,7 @@ sequenceDiagram
 
 The ingestion pipeline lives in `scripts/create_embeddings.py` and writes chunked card data plus embeddings into MongoDB.
 
-1. Load Scryfall JSON files from `SCRYFALL_DATASET_PATH`.
+1. Load Scryfall JSON files from `SCRYFALL_DATASET_FILE`.
 1. Normalize and select relevant fields (`name`, `type_line`, `oracle_text`, etc.).
 1. Chunk `oracle_text` into token-sized slices for better recall.
 1. Embed each chunk with a local Sentence Transformers model.

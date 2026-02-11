@@ -37,5 +37,4 @@
 
 ## Configuration & Data Notes
 
-- Required env vars: `MONGODB_URI` (plus optional `MONGODB_DB`, `MONGODB_COLLECTION`, `SCRYFALL_DATASET_PATH`).
 - Dataset files are large JSON arrays; validate structure before running embeddings.

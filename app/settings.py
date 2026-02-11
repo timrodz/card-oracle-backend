@@ -1,7 +1,18 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
+from pydantic import AfterValidator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _validate_json_file_type(value: Path) -> Path:
+    if value.suffix.lower() != ".json":
+        raise ValueError(f"Expected a .json file path, got: {value}")
+    return value
+
+
+JsonFilePath = Annotated[Path, AfterValidator(_validate_json_file_type)]
 
 
 class Settings(BaseSettings):
@@ -18,7 +29,7 @@ class Settings(BaseSettings):
     mongodb_collection: str = "cards"
     mongodb_collection_embeddings: str = "card_embeddings"
 
-    scryfall_dataset_path: Path = Path("datasets/scryfall")
+    scryfall_dataset_file: JsonFilePath = Path("datasets/scryfall/bulk.json")
     mongo_batch_size: int = 500
 
     embed_model_name: str = "mixedbread-ai/mxbai-embed-xsmall-v1"

@@ -1,20 +1,14 @@
 import logging
 from pathlib import Path
-from types import ModuleType
-from typing import List, Optional
+from typing import List
 
+import torch as torch_module
 from sentence_transformers import SentenceTransformer
-
-torch_module: Optional[ModuleType]
-try:
-    import torch as torch_module
-except ImportError:  # pragma: no cover - torch is a dependency of sentence-transformers
-    torch_module = None
 
 
 def load_transformer(model_name: str, model_path: str) -> SentenceTransformer:
     device = "cpu"
-    if torch_module is not None and torch_module.cuda.is_available():
+    if torch_module.cuda.is_available():
         device = "cuda"
     resolved_path = Path(model_path)
     if resolved_path.exists():
