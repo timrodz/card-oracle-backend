@@ -1,25 +1,29 @@
-import logging
 from pathlib import Path
 from typing import List
 
 import torch as torch_module
+from loguru import logger
 from sentence_transformers import SentenceTransformer
 
+from app.core.config import transformer_settings
 
-def load_transformer(model_name: str, model_path: str) -> SentenceTransformer:
+
+def load_transformer() -> SentenceTransformer:
     device = "cpu"
     if torch_module.cuda.is_available():
         device = "cuda"
+    model_name = transformer_settings.embedding_model_name
+    model_path = transformer_settings.embedding_model_path
     resolved_path = Path(model_path)
     if resolved_path.exists():
-        logging.info(
+        logger.info(
             "Loading embedding model from path: %s (device=%s)",
             resolved_path,
             device,
         )
         model = SentenceTransformer(str(resolved_path), device=device)
     else:
-        logging.info(
+        logger.info(
             "Loading embedding model: %s (device=%s, path=%s)",
             model_name,
             device,
@@ -32,6 +36,7 @@ def load_transformer(model_name: str, model_path: str) -> SentenceTransformer:
 
 
 def embed_text(
+    *,
     model: SentenceTransformer,
     text: str,
     normalize: bool,

@@ -1,12 +1,12 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 
 class SearchResult(BaseModel):
-    source_id: str | None = None
+    source_id: str
     summary: str
-    score: float | None = None
+    score: float
 
 
 class SearchResponse(BaseModel):
@@ -15,14 +15,6 @@ class SearchResponse(BaseModel):
     answer: str | None = None
     source_id: str | None = None
     answer_raw: str | None = None
-
-
-class CardResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    id: str | None = None
-    source_id: str | None = None
-    mongo_id: str | None = Field(default=None, alias="_id")
 
 
 class StreamMetaEvent(BaseModel):

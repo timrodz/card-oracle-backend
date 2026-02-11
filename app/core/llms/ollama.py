@@ -1,13 +1,6 @@
-import logging
+from loguru import logger
 
-from app.data_pipeline.providers.provider import LLMProvider
-
-
-def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+from app.core.llms.provider import LLMProvider
 
 
 class OllamaProvider(LLMProvider):
@@ -30,7 +23,7 @@ class OllamaProvider(LLMProvider):
 
     def generate(self, prompt: str) -> str:
         try:
-            logging.info(f"Generate:{prompt}")
+            logger.info(f"Generate:{prompt}")
             result = self._client.generate(model=self._model, prompt=prompt)
         except Exception as exc:  # pragma: no cover - depends on runtime service state
             raise RuntimeError(f"ollama generate failed: {exc}") from exc
@@ -39,7 +32,7 @@ class OllamaProvider(LLMProvider):
 
     def stream(self, prompt: str):
         try:
-            logging.info(f"Stream:{prompt}")
+            logger.info(f"Stream:{prompt}")
             stream = self._client.chat(
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],

@@ -60,6 +60,30 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
+### MongoDB setup
+
+`atlas` cli is required in order to use vector search. Here's a local setup:
+
+```bash
+> atlas local setup
+> Mongo version: latest
+> Name: cards-oracle
+Successfully setup deployment 'cards-oracle'
+MongoDB version: 8.2.4
+Port: <PORT>
+Load sample data: false
+Connected via: Compass
+```
+
+Set `MONGODB_URI` port to the `<PORT>` obtained in the output above
+
+Connect to the cluster manually:
+
+```bash
+> atlas deployments connect
+choose "cards-oracle"
+```
+
 ### Development
 
 Run the FastAPI server:
@@ -78,18 +102,20 @@ fastapi dev app/main.py
 
 ![image](docs/architecture/data-ingestion-pipeline.png)
 
-#### 1.1 Embeddings
+#### 1.1 Dataset into MongoDB
 
 Load the JSON response into a collection. We will use this later for API endpoints and extra augmentation.
 
 ```bash
-python -m app.data_pipeline.ingest_dataset > logs/ingest_dataset.log 2>&1
+python -m app.data_pipeline.ingest_dataset
 ```
+
+#### 1.2 Create vector search embeddings w/ chunking
 
 Run embeddings with 50 entries just to verify it all works well
 
 ```bash
-python -m app.data_pipeline.create_embeddings > logs/create_embeddings_sample.log 2>&1 --limit 50
+python -m app.data_pipeline.create_embeddings
 ```
 
 This will take ~15-30 seconds.
@@ -103,7 +129,6 @@ Then connect to Mongo via CLI and query the database:
 {
   "_id": "a471b306-4941-4e46-a0cb-d92895c16f8a",
   "object": "card",
-  "id": "a471b306-4941-4e46-a0cb-d92895c16f8a",
   "oracle_id": "00037840-6089-42ec-8c5c-281f9f474504",
   "multiverse_ids": [
     692174
@@ -129,36 +154,15 @@ Then connect to Mongo via CLI and query the database:
 If the above went right, you're ready to run the entire ingestion pipeline:
 
 ```bash
-> python -m app.data_pipeline.create_embedding > logs/create_embeddings.log 2>&1
+> python -m app.data_pipeline.create_embeddings
 ```
 
 Note: This will take anywhere around 10 minutes on a Macbook with no GPU.
 
-#### 1.2. Create vector search index
-
-In order to retrieve data using embeddings, we must create a search index for our vector
-
-```bash
-> atlas deployments search indexes create --file docs/vector-search-indexes/card_embeddings.json
-you're using an old search index definition
-Search index created with ID: 69884584b41ae52dc72ff971
-```
-
-Verify the index setup worked:
-
-```bash
-> atlas local ls
-NAME                 MDB VER    STATE
-<DEPLOYMENT_NAME>    8.2.4      running
-> atlas local search indexes list --deploymentName <DEPLOYMENT> --db mtg --collection card_embeddings
-ID      NAME            DATABASE    COLLECTION         STATUS    TYPE
-<ID>    vector_index    mtg         card_embeddings    READY     vectorSearch
-```
-
 Note: If you need to delete the index:
 
 ```bash
-atlas local search indexes delete --deploymentName <DEPLOYMENT>
+atlas local search indexes delete --deploymentName cards-oracle
 > Database? db
 > Collection? card_embeddings
 > Search Index Name? vector_index
@@ -173,7 +177,7 @@ Index 'vector_index' deleted
 Use the local Sentence Transformers embedder for the query, run vector search, and have Ollama answer with retrieved context:
 
 ```bash
-> python -m app.data_pipeline.query_rag "Which cards care about Phyrexians?"
+> python -m app.core.rag.search "Which cards care about Phyrexians?"
 2026-02-09 21:03:36,349 INFO Loading embedding model from path: models/sentence-transformers/all-MiniLM-L6-v2 (device=cpu)
 "...Output from transformer setup..."
 2026-02-09 21:03:50,870 INFO HTTP Request: POST http://127.0.0.1:11434/api/generate "HTTP/1.1 200 OK"

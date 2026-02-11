@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict
 
 ScryfallCardLegality = Literal["legal", "not_legal", "restricted", "banned"]
 ScryfallCardColor = Literal["W", "R", "B", "U", "G"] | None
@@ -50,12 +50,9 @@ class ScryfallCardPurchaseUris(BaseModel):
     cardhoarder: str | None = None
 
 
-class ScryfallCard(BaseModel):
+class ScryfallCardBase(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
     object: Literal["card"]
-    mongo_id: str | None = Field(default=None, alias="_id")
-    id: str | None = None
     oracle_id: str
     multiverse_ids: list[int]
     resource_id: str | None = None
@@ -125,11 +122,9 @@ class ScryfallCard(BaseModel):
     related_uris: ScryfallCardRelatedUris | None = None
     purchase_uris: ScryfallCardPurchaseUris | None = None
 
-    @model_validator(mode="after")
-    def populate_mongo_id(self) -> "ScryfallCard":
-        if self.mongo_id is None:
-            self.mongo_id = self.id
-        return self
+
+class ScryfallCard(ScryfallCardBase):
+    id: str
 
 
 class ScryfallCardApiResponse(BaseModel):
