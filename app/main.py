@@ -1,9 +1,12 @@
+from typing import Any, Dict
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from app.core import fetch_card, search_rag, search_rag_stream
+from app.models.api import CardResponse, SearchResponse
 from app.settings import get_settings
 
 app = FastAPI()
@@ -26,8 +29,8 @@ def read_root():
     return {"Hello": "World"}
 
 
-@app.get("/search")
-async def search(query: str = Query(..., min_length=1)) -> dict:
+@app.get("/search", response_model=SearchResponse)
+async def search(query: str = Query(..., min_length=1)) -> Dict[str, Any]:
     return await search_rag(query)
 
 
@@ -39,6 +42,6 @@ async def stream_search(query: str = Query(..., min_length=1)) -> StreamingRespo
     )
 
 
-@app.get("/cards/{id}")
-async def get_card(id: str) -> dict:
+@app.get("/cards/{id}", response_model=CardResponse)
+async def get_card(id: str) -> Dict[str, Any]:
     return await fetch_card(id)

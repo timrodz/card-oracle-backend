@@ -4,11 +4,14 @@ import re
 from typing import Any, Dict, Iterator
 
 from fastapi import HTTPException
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from pymongo import MongoClient
 
 from app.data_pipeline import query_rag
+from app.models.api import StreamErrorEvent, StreamEvent
 from app.settings import get_settings
+
+stream_event_adapter: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
 
 
 def get_cards_collection():
@@ -35,7 +38,14 @@ async def search_rag(query: str) -> Dict[str, Any]:
 
 
 def _encode_sse(event: Dict[str, Any]) -> str:
-    payload = json.dumps(event)
+    try:
+        validated_event = stream_event_adapter.validate_python(event)
+        payload = json.dumps(validated_event.model_dump(exclude_none=True))
+    except ValidationError as exc:
+        fallback = StreamErrorEvent(
+            type="error", message=f"Invalid stream event payload: {exc}"
+        )
+        payload = json.dumps(fallback.model_dump(exclude_none=True))
     return f"data: {payload}\n\n"
 
 
