@@ -8,7 +8,7 @@ from pydantic import TypeAdapter, ValidationError
 from pymongo import MongoClient
 
 from app.data_pipeline import query_rag
-from app.models.api import StreamErrorEvent, StreamEvent
+from app.models.api import CardResponse, SearchResponse, StreamErrorEvent, StreamEvent
 from app.settings import get_settings
 
 stream_event_adapter: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
@@ -30,11 +30,13 @@ async def search_rag(query: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        result = await asyncio.to_thread(query_rag.search, query, config)
+        result = await asyncio.to_thread(
+            query_rag.search, question=query, config=config
+        )
     except Exception as exc:  # pragma: no cover - depends on external services
         raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
 
-    return result
+    return SearchResponse.model_validate(result).model_dump(exclude_none=True)
 
 
 def _encode_sse(event: Dict[str, Any]) -> str:
@@ -58,9 +60,7 @@ def search_rag_stream(query: str) -> Iterator[str]:
         return
 
     try:
-        for event in query_rag.search_stream(query, config):
-            if event["type"] == "meta":
-                print(event)
+        for event in query_rag.search_stream(question=query, config=config):
             yield _encode_sse(event)
     except Exception as exc:  # pragma: no cover - depends on external services
         yield _encode_sse(
@@ -76,7 +76,9 @@ async def fetch_card(id: str) -> Dict[str, Any]:
     card = await asyncio.to_thread(collection.find_one, query)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    return card
+    return CardResponse.model_validate(card).model_dump(
+        by_alias=True, exclude_none=True
+    )
 
 
 def _normalize_card_id(raw_id: str) -> str:

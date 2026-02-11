@@ -14,6 +14,7 @@ from app.data_pipeline.sentence_transformers import (
     embed_text,
     load_transformer,
 )
+from app.models.api import SearchResponse, SearchResult
 from app.settings import get_settings
 
 
@@ -68,18 +69,19 @@ def setup_logging() -> None:
     )
 
 
-def embed_query(model, question: str, normalize: bool) -> List[float]:
+def embed_query(*, model, question: str, normalize: bool) -> List[float]:
     return embed_text(model, question, normalize)
 
 
 def vector_search(
+    *,
     collection,
     query_vector: List[float],
     vector_index: str,
     vector_path: str,
     num_candidates: int,
     limit: int,
-) -> List[Dict[str, Any]]:
+) -> List[SearchResult]:
     pipeline = [
         {
             "$vectorSearch": {
@@ -99,26 +101,32 @@ def vector_search(
             }
         },
     ]
-    results = list(collection.aggregate(pipeline))
-    logging.info(f"results: {results}")
+    raw_results = list(collection.aggregate(pipeline))
+    results: List[SearchResult] = []
+    for raw_result in raw_results:
+        try:
+            results.append(SearchResult.model_validate(raw_result))
+        except ValidationError:
+            logging.warning("Skipping invalid search result: %s", raw_result)
+    logging.info("results: %s", [result.model_dump() for result in results])
     return results
 
 
-def format_result(result: Dict[str, Any]) -> str:
-    return result["summary"]
+def format_result(result: SearchResult) -> str:
+    return result.summary
 
 
 def build_context(
-    results: List[Dict[str, Any]], max_chars: int, include_source_ids: bool
+    *, results: List[SearchResult], max_chars: int, include_source_ids: bool
 ) -> str:
     sections: List[str] = []
     total = 0
     for result in results:
         header = ""
         if include_source_ids:
-            source_id = result.get("source_id")
+            source_id = result.source_id
             header = f"source_id: {source_id}\n" if source_id else ""
-        section = f"{header}{result['summary']}"
+        section = f"{header}{result.summary}"
         if total + len(section) > max_chars:
             remaining = max_chars - total
             if remaining > 0:
@@ -129,7 +137,7 @@ def build_context(
     return "\n".join(sections).strip()
 
 
-def build_prompt(question: str, context: str, require_json: bool) -> str:
+def build_prompt(*, question: str, context: str, require_json: bool) -> str:
     instructions = (
         "Answer the question using the provided context. "
         "If the context is insufficient, say so and suggest what to ask next."
@@ -151,7 +159,7 @@ def build_prompt(question: str, context: str, require_json: bool) -> str:
     return json.dumps(payload)
 
 
-def build_source_id_prompt(question: str, context: str, answer: str) -> str:
+def build_source_id_prompt(*, question: str, context: str, answer: str) -> str:
     payload = {
         "role": "You identify the best matching card from provided context.",
         "instructions": (
@@ -239,72 +247,103 @@ def parse_source_id_response(response: str) -> Optional[str]:
     return None
 
 
-def search(question: str, config: Config) -> Dict[str, Any]:
+def _dump_results(results: List[SearchResult]) -> List[Dict[str, Any]]:
+    return [result.model_dump() for result in results]
+
+
+def search(*, question: str, config: Config) -> Dict[str, Any]:
     embedder = load_transformer(config.embed_model_name, config.embed_model_path)
-    query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
+    query_embeddings = embed_query(
+        model=embedder,
+        question=question,
+        normalize=config.normalize_embeddings,
+    )
 
     client: MongoClient = MongoClient(config.mongodb_uri)
     collection = client[config.mongodb_db][config.mongodb_collection]
 
     results = vector_search(
-        collection,
-        query_embeddings,
-        config.vector_index,
-        config.vector_path,
-        config.num_candidates,
-        config.limit,
+        collection=collection,
+        query_vector=query_embeddings,
+        vector_index=config.vector_index,
+        vector_path=config.vector_path,
+        num_candidates=config.num_candidates,
+        limit=config.limit,
     )
 
     if not results:
-        return {"results": [], "context": "", "answer": None, "source_id": None}
+        return SearchResponse(
+            results=[],
+            context="",
+            answer=None,
+            source_id=None,
+        ).model_dump()
 
-    context = build_context(results, config.max_context_chars, include_source_ids=True)
+    context = build_context(
+        results=results,
+        max_chars=config.max_context_chars,
+        include_source_ids=True,
+    )
     if not context:
-        return {"results": results, "context": "", "answer": None, "source_id": None}
+        return SearchResponse(
+            results=results,
+            context="",
+            answer=None,
+            source_id=None,
+        ).model_dump()
 
-    prompt = build_prompt(question, context, require_json=True)
+    prompt = build_prompt(question=question, context=context, require_json=True)
     provider = build_provider(config)
     response = provider.generate(prompt)
     clean_response, source_id = parse_llm_response(response)
-    return {
-        "results": results,
-        "context": context,
-        "answer": clean_response,
-        "source_id": source_id,
-        "answer_raw": response,
-    }
+    return SearchResponse(
+        results=results,
+        context=context,
+        answer=clean_response,
+        source_id=source_id,
+        answer_raw=response,
+    ).model_dump()
 
 
-def search_stream(question: str, config: Config) -> Iterator[Dict[str, Any]]:
+def search_stream(*, question: str, config: Config) -> Iterator[Dict[str, Any]]:
     embedder = load_transformer(config.embed_model_name, config.embed_model_path)
-    query_embeddings = embed_query(embedder, question, config.normalize_embeddings)
+    query_embeddings = embed_query(
+        model=embedder,
+        question=question,
+        normalize=config.normalize_embeddings,
+    )
 
     client: MongoClient = MongoClient(config.mongodb_uri)
     collection = client[config.mongodb_db][config.mongodb_collection]
 
     results = vector_search(
-        collection,
-        query_embeddings,
-        config.vector_index,
-        config.vector_path,
-        config.num_candidates,
-        config.limit,
+        collection=collection,
+        query_vector=query_embeddings,
+        vector_index=config.vector_index,
+        vector_path=config.vector_path,
+        num_candidates=config.num_candidates,
+        limit=config.limit,
     )
+    serialized_results = _dump_results(results)
 
     if not results:
         yield {"type": "meta", "results": [], "context": ""}
         yield {"type": "done"}
         return
 
-    context = build_context(results, config.max_context_chars, include_source_ids=False)
+    context = build_context(
+        results=results,
+        max_chars=config.max_context_chars,
+        include_source_ids=False,
+    )
     if not context:
-        yield {"type": "meta", "results": results, "context": ""}
+        yield {"type": "meta", "results": serialized_results, "context": ""}
         yield {"type": "done"}
         return
 
-    prompt = build_prompt(question, context, require_json=False)
+    prompt = build_prompt(question=question, context=context, require_json=False)
     provider = build_provider(config)
-    yield {"type": "meta", "results": results, "context": context}
+    yield {"type": "meta", "results": serialized_results, "context": context}
 
     streamed_parts: List[str] = []
     had_error = False
@@ -319,24 +358,29 @@ def search_stream(question: str, config: Config) -> Iterator[Dict[str, Any]]:
         if streamed_parts and not had_error:
             full_response = "".join(streamed_parts)
             source_context = build_context(
-                results, config.max_context_chars, include_source_ids=True
+                results=results,
+                max_chars=config.max_context_chars,
+                include_source_ids=True,
             )
             source_prompt = build_source_id_prompt(
-                question, source_context, full_response
+                question=question,
+                context=source_context,
+                answer=full_response,
             )
             try:
                 yield {"type": "seeking_card"}
-                source_id = provider.generate(source_prompt)
-                print(f"Source {source_id}")
+                source_response = provider.generate(source_prompt)
+                source_id = parse_source_id_response(source_response)
             except Exception as exc:  # pragma: no cover - depends on runtime service
                 yield {"type": "error", "message": str(exc)}
                 yield {"type": "done"}
                 return
-            yield {"type": "found_card", "id": source_id}
+            if source_id:
+                yield {"type": "found_card", "id": source_id}
         yield {"type": "done"}
 
 
-def log_results(results: List[Dict[str, Any]]) -> None:
+def log_results(results: List[SearchResult]) -> None:
     logging.info("Top %d results:", len(results))
     for result in results:
         logging.info("\n%s", format_result(result))
@@ -369,8 +413,8 @@ def main() -> None:
         raise SystemExit("Question is required. Provide it as an argument.")
 
     config = load_config()
-    result = search(question, config)
-    results = result["results"]
+    result = search(question=question, config=config)
+    results = [SearchResult.model_validate(item) for item in result["results"]]
     if not results:
         logging.info("No results found for query.")
         return
